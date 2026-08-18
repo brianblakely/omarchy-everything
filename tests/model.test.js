@@ -82,16 +82,33 @@ const item = (id, title, context, extra = {}) => ({
   assert.notEqual(sandbox.kindIcon("window"), sandbox.kindIcon("neovim-buffer"))
   assert.equal(sandbox.vitalMetadata(
     item("window", "Window", "App · workspace 4", { badges: ["Window", "Workspace 4"] }), ""),
-  "Workspace 4")
+    "Workspace 4")
   assert.equal(sandbox.vitalMetadata(
     item("buffer", "File", "/tmp/file", { kind: "neovim-buffer", badges: ["Buffer", "Modified", "Visible"] }), ""),
-  "Modified")
+    "Modified")
   assert.equal(sandbox.vitalMetadata(
     item("browser", "Site", "Browser · native tab", { kind: "browser-tab", provider: "Firefox", badges: ["Tab", "Title only"] }), ""),
-  "Firefox")
+    "Firefox")
   assert.equal(sandbox.vitalMetadata(
     item("pane", "Shell", "/src", { kind: "terminal-pane", badges: ["Pane"] }), "Project › /src"),
-  "Project › /src")
+    "Project › /src")
+  assert.equal(sandbox.vitalMetadata(
+    item("tmux-window", "Editor", "tmux window @4", { kind: "tmux-window", provider: "tmux", badges: ["Window"] }),
+    "dev › tmux window @4"), "dev › @4")
+  assert.equal(sandbox.vitalMetadata(
+    item("surface", "Shell", "Ghostty surface", { kind: "terminal-pane", provider: "Ghostty", badges: ["Surface"] }),
+    "Terminal › Ghostty surface"), "Terminal")
+  const kinds = [
+    "window", "browser-tab", "app-tab", "terminal-tab", "terminal-pane",
+    "tmux-session", "tmux-window", "tmux-pane", "herdr-session",
+    "herdr-workspace", "herdr-tab", "herdr-pane", "herdr-agent", "neovim-buffer",
+  ]
+  for (const kind of kinds) {
+    const label = sandbox.kindLabel(kind)
+    const metadata = sandbox.vitalMetadata(
+      item(kind, "Title", "Useful context", { kind, provider: "Provider", badges: [label] }), "")
+    assert.notEqual(metadata, label, `${kind} metadata does not repeat its kind`)
+  }
 }
 
 {
@@ -159,6 +176,7 @@ const searchHandler = qml.slice(qml.indexOf("id: searchField"), qml.indexOf("id:
 const resultListStart = qml.indexOf("id: resultList")
 const resultDelegateStart = qml.indexOf("\n        delegate: Item", resultListStart)
 const listHandler = qml.slice(resultListStart, resultDelegateStart)
+const resultDelegateHandler = qml.slice(resultDelegateStart, qml.indexOf("MouseArea", resultDelegateStart))
 const statusHandler = qml.slice(qml.indexOf("id: statusText"), resultListStart)
 assert.doesNotMatch(searchHandler, /Key_Backspace|Key_Delete/, "search owns editing keys")
 assert.match(qml, /focusTarget:\s*resultList/,
@@ -207,8 +225,8 @@ assert.doesNotMatch(qml, /rowMouse\.containsMouse/,
   "row styling never treats a stationary pointer as movement")
 assert.doesNotMatch(qml, /id:\s*heading\b/,
   "the panel does not render a redundant title row")
-assert.match(qml, /readonly property int rowHeight:\s*Style\.space\(36\)/,
-  "result rows use the compact single-line layout")
+assert.match(qml, /readonly property real rowHeight:\s*Style\.font\.body \* 1\.5/,
+  "result row height scales to one and a half times the thing-name font")
 assert.match(qml, /section\.property:\s*"kind"[\s\S]*section\.delegate:[\s\S]*Accessible\.Heading/,
   "the list renders accessible kind headings")
 assert.match(qml, /id:\s*thingIcon[\s\S]*Model\.kindIcon\(row\.modelData\.kind\)/,
@@ -217,6 +235,13 @@ assert.match(qml, /id:\s*metadataLabel[\s\S]*text:\s*row\.metadata/,
   "every row renders one selected metadata value")
 assert.doesNotMatch(qml, /id:\s*badgeRow|id:\s*badgeLabel|radius:\s*height \/ 2/,
   "result rows do not render metadata pills")
+const titleHandler = qml.slice(qml.indexOf("id: titleLabel"), qml.indexOf("MouseArea", qml.indexOf("id: titleLabel")))
+assert.doesNotMatch(titleHandler, /font\.(?:bold|weight)/,
+  "thing names remain regular weight in every state")
+assert.match(titleHandler, /lineHeightMode:\s*Text\.FixedHeight[\s\S]*lineHeight:\s*root\.rowHeight/,
+  "thing-name text uses the same one-and-a-half-times line height")
+assert.doesNotMatch(resultDelegateHandler, /border\.(?:width|color)/,
+  "the highlighted thing uses fill without an outline")
 assert.doesNotMatch(qml, /refreshButton|Refresh all providers|everythingService\.refresh\(\)/,
   "automatic discovery does not expose a redundant manual refresh control")
 assert.match(statusHandler, /visible:\s*text\.length > 0[\s\S]*height:\s*visible \? Style\.space\(22\) : 0/,

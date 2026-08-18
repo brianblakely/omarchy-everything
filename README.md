@@ -72,7 +72,8 @@ current thing, and recency. Opening beneath a stationary pointer does not move
 the keyboard highlight; pointer selection begins only after actual movement.
 Each result is one line: a deterministic kind icon, its title, and one vital
 status or context value. Status annotations remain searchable and available to
-assistive technology, but are not rendered as pills.
+assistive technology, but are not rendered as pills. The right-side value never
+repeats the kind already communicated by the section and icon.
 
 | Focus | Keys | Action |
 |---|---|---|

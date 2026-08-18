@@ -15,7 +15,7 @@ The suite performs:
   group, active/recency order, duplicate identity handling, token
   authentication, and hidden-result persistence;
 - deterministic kind icons, one-line row density, vital-metadata selection,
-  and absence of visual metadata pills;
+  exclusion of redundant kind labels, and absence of visual metadata pills;
 - every documented keyboard alias, focus-sensitive Delete/Backspace ownership,
   safe selection after removal, stationary-pointer filtering, deliberate
   pointer selection, and close-before-activation ordering;
@@ -138,7 +138,8 @@ single refresh followed by a visible stale notification.
 - Confirm every row is one line with a kind icon on the left and exactly one
   status or context value on the right. Exercise long titles and paths, active
   states, modified buffers, detached sessions, and special workspaces; confirm
-  text elides without overlap and no pill-shaped metadata is rendered.
+  text elides without overlap, kind labels never repeat in the right-side
+  value, and no pill-shaped metadata is rendered.
 - Scroll to and highlight a middle result, close the panel, and open it again.
   Confirm the first result is highlighted and the list is at its scroll origin.
 - Open the panel while the pointer is stationary over a result. Confirm that

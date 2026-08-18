@@ -17,7 +17,7 @@ Panel {
     ? root.bar.shell.serviceFor("b.everything") : null
   readonly property color foreground: root.bar ? root.bar.foreground : Color.foreground
   readonly property color dimForeground: Qt.darker(foreground, 1.55)
-  readonly property int rowHeight: Style.space(36)
+  readonly property real rowHeight: Style.font.body * 1.5
   readonly property int sectionHeight: Style.space(24)
   property var rankedItems: []
   property string selectedItemUuid: ""
@@ -529,8 +529,6 @@ Panel {
             color: row.highlighted
               ? Style.focusFillFor(root.foreground, Color.accent)
               : "transparent"
-            border.width: row.highlighted ? Math.max(1, Style.normalBorderWidth) : 0
-            border.color: Color.accent
           }
 
           Text {
@@ -578,7 +576,8 @@ Panel {
             color: root.foreground
             font.family: Style.font.family
             font.pixelSize: Style.font.body
-            font.bold: row.highlighted || row.modelData.active === true
+            lineHeightMode: Text.FixedHeight
+            lineHeight: root.rowHeight
             elide: Text.ElideRight
           }
 

@@ -95,6 +95,78 @@ function kindIcon(kind) {
   return icons[String(kind)] || "\uf128"
 }
 
+function isKindMetadata(value) {
+  var kinds = {
+    "thing": true,
+    "window": true,
+    "windows": true,
+    "tab": true,
+    "tabs": true,
+    "browser tab": true,
+    "browser tabs": true,
+    "app tab": true,
+    "application tab": true,
+    "application tabs": true,
+    "terminal tab": true,
+    "terminal tabs": true,
+    "pane": true,
+    "panes": true,
+    "terminal pane": true,
+    "terminal panes": true,
+    "surface": true,
+    "surfaces": true,
+    "session": true,
+    "sessions": true,
+    "tmux session": true,
+    "tmux sessions": true,
+    "tmux window": true,
+    "tmux windows": true,
+    "tmux pane": true,
+    "tmux panes": true,
+    "herdr session": true,
+    "herdr sessions": true,
+    "workspace": true,
+    "workspaces": true,
+    "herdr workspace": true,
+    "herdr workspaces": true,
+    "herdr tab": true,
+    "herdr tabs": true,
+    "herdr pane": true,
+    "herdr panes": true,
+    "agent": true,
+    "agents": true,
+    "herdr agent": true,
+    "herdr agents": true,
+    "buffer": true,
+    "buffers": true,
+    "neovim buffer": true,
+    "neovim buffers": true,
+    "native": true,
+    "title only": true
+  }
+  return kinds[normalized(value)] === true
+}
+
+function contextMetadata(item, breadcrumb) {
+  var kind = String(item && item.kind || "")
+  var provider = String(item && item.provider || "")
+  if (kind === "browser-tab" || kind === "app-tab") return provider
+
+  var value = String(breadcrumb || (item && item.context) || "").trim()
+  if (kind === "tmux-window") value = value.replace(/\btmux window\s+/i, "")
+  else if (kind === "tmux-pane") value = value.replace(/\btmux pane\s+/i, "")
+  else if (kind === "terminal-pane"
+           && normalized(item.context) === normalized(provider + " surface")) {
+    var context = String(item.context || "")
+    var prefix = value.slice(0, Math.max(0, value.length - context.length))
+      .replace(/\s*›\s*$/, "").trim()
+    value = prefix || provider
+  }
+
+  if (isKindMetadata(value)) return provider
+  return value || provider
+}
+
 function vitalMetadata(item, breadcrumb) {
   if (!item) return ""
   var badges = stringList(item.badges)
@@ -108,27 +180,10 @@ function vitalMetadata(item, breadcrumb) {
     }
   }
 
-  var generic = {
-    "window": true,
-    "tab": true,
-    "pane": true,
-    "session": true,
-    "workspace": true,
-    "buffer": true,
-    "surface": true,
-    "native": true,
-    "title only": true
-  }
   for (var index = badges.length - 1; index >= 0; index--) {
-    var key = normalized(badges[index])
-    if (key && generic[key] !== true) return badges[index]
+    if (!isKindMetadata(badges[index])) return badges[index]
   }
-
-  var kind = String(item.kind || "")
-  if (kind === "browser-tab" || kind === "app-tab")
-    return String(item.provider || "")
-  var context = String(breadcrumb || item.context || "").trim()
-  return context || String(item.provider || "")
+  return contextMetadata(item, breadcrumb)
 }
 
 function kindSectionLabel(kind) {
