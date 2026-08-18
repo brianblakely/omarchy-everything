@@ -74,8 +74,24 @@ const item = (id, title, context, extra = {}) => ({
   )
   assert.equal(sandbox.kindSectionLabel("browser-tab"), "Browser tabs")
   assert.equal(sandbox.kindSectionLabel("neovim-buffer"), "Neovim buffers")
-  assert.equal(sandbox.sectionedRowTop(sandbox.rank(rows, "", {}), 0, 44, 24), 24)
-  assert.equal(sandbox.sectionedRowTop(sandbox.rank(rows, "", {}), 2, 44, 24), 136)
+  assert.equal(sandbox.sectionedRowTop(sandbox.rank(rows, "", {}), 0, 36, 24), 24)
+  assert.equal(sandbox.sectionedRowTop(sandbox.rank(rows, "", {}), 2, 36, 24), 120)
+}
+
+{
+  assert.notEqual(sandbox.kindIcon("window"), sandbox.kindIcon("neovim-buffer"))
+  assert.equal(sandbox.vitalMetadata(
+    item("window", "Window", "App · workspace 4", { badges: ["Window", "Workspace 4"] }), ""),
+  "Workspace 4")
+  assert.equal(sandbox.vitalMetadata(
+    item("buffer", "File", "/tmp/file", { kind: "neovim-buffer", badges: ["Buffer", "Modified", "Visible"] }), ""),
+  "Modified")
+  assert.equal(sandbox.vitalMetadata(
+    item("browser", "Site", "Browser · native tab", { kind: "browser-tab", provider: "Firefox", badges: ["Tab", "Title only"] }), ""),
+  "Firefox")
+  assert.equal(sandbox.vitalMetadata(
+    item("pane", "Shell", "/src", { kind: "terminal-pane", badges: ["Pane"] }), "Project › /src"),
+  "Project › /src")
 }
 
 {
@@ -191,10 +207,16 @@ assert.doesNotMatch(qml, /rowMouse\.containsMouse/,
   "row styling never treats a stationary pointer as movement")
 assert.doesNotMatch(qml, /id:\s*heading\b/,
   "the panel does not render a redundant title row")
-assert.match(qml, /readonly property int rowHeight:\s*Style\.space\(44\)/,
-  "result rows use the compact two-line layout")
+assert.match(qml, /readonly property int rowHeight:\s*Style\.space\(36\)/,
+  "result rows use the compact single-line layout")
 assert.match(qml, /section\.property:\s*"kind"[\s\S]*section\.delegate:[\s\S]*Accessible\.Heading/,
   "the list renders accessible kind headings")
+assert.match(qml, /id:\s*thingIcon[\s\S]*Model\.kindIcon\(row\.modelData\.kind\)/,
+  "every row displays its deterministic kind icon")
+assert.match(qml, /id:\s*metadataLabel[\s\S]*text:\s*row\.metadata/,
+  "every row renders one selected metadata value")
+assert.doesNotMatch(qml, /id:\s*badgeRow|id:\s*badgeLabel|radius:\s*height \/ 2/,
+  "result rows do not render metadata pills")
 assert.doesNotMatch(qml, /refreshButton|Refresh all providers|everythingService\.refresh\(\)/,
   "automatic discovery does not expose a redundant manual refresh control")
 assert.match(statusHandler, /visible:\s*text\.length > 0[\s\S]*height:\s*visible \? Style\.space\(22\) : 0/,

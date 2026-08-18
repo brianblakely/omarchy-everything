@@ -75,6 +75,62 @@ function kindLabel(kind) {
   return labels[String(kind)] || String(kind || "Thing")
 }
 
+function kindIcon(kind) {
+  var icons = {
+    "window": "\uf2d0",
+    "browser-tab": "\uf0ac",
+    "app-tab": "\uf24d",
+    "terminal-tab": "\uf120",
+    "terminal-pane": "\uf0db",
+    "tmux-session": "\uf233",
+    "tmux-window": "\uf24d",
+    "tmux-pane": "\uf0db",
+    "herdr-session": "\uf233",
+    "herdr-workspace": "\uf009",
+    "herdr-tab": "\uf24d",
+    "herdr-pane": "\uf0db",
+    "herdr-agent": "\uf544",
+    "neovim-buffer": "\uf1c9"
+  }
+  return icons[String(kind)] || "\uf128"
+}
+
+function vitalMetadata(item, breadcrumb) {
+  if (!item) return ""
+  var badges = stringList(item.badges)
+  var priorities = [
+    "error", "blocked", "modified", "working", "scratchpad", "hidden",
+    "detached", "unloaded", "visible", "attached", "group", "done", "idle"
+  ]
+  for (var priority = 0; priority < priorities.length; priority++) {
+    for (var badge = 0; badge < badges.length; badge++) {
+      if (normalized(badges[badge]) === priorities[priority]) return badges[badge]
+    }
+  }
+
+  var generic = {
+    "window": true,
+    "tab": true,
+    "pane": true,
+    "session": true,
+    "workspace": true,
+    "buffer": true,
+    "surface": true,
+    "native": true,
+    "title only": true
+  }
+  for (var index = badges.length - 1; index >= 0; index--) {
+    var key = normalized(badges[index])
+    if (key && generic[key] !== true) return badges[index]
+  }
+
+  var kind = String(item.kind || "")
+  if (kind === "browser-tab" || kind === "app-tab")
+    return String(item.provider || "")
+  var context = String(breadcrumb || item.context || "").trim()
+  return context || String(item.provider || "")
+}
+
 function kindSectionLabel(kind) {
   var labels = {
     "window": "Windows",

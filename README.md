@@ -70,6 +70,9 @@ badge, or search term. Results are grouped by exact kind in a stable order;
 within each group, title matches rank first, followed by context/type, the
 current thing, and recency. Opening beneath a stationary pointer does not move
 the keyboard highlight; pointer selection begins only after actual movement.
+Each result is one line: a deterministic kind icon, its title, and one vital
+status or context value. Status annotations remain searchable and available to
+assistive technology, but are not rendered as pills.
 
 | Focus | Keys | Action |
 |---|---|---|

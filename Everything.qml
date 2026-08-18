@@ -17,7 +17,7 @@ Panel {
     ? root.bar.shell.serviceFor("b.everything") : null
   readonly property color foreground: root.bar ? root.bar.foreground : Color.foreground
   readonly property color dimForeground: Qt.darker(foreground, 1.55)
-  readonly property int rowHeight: Style.space(44)
+  readonly property int rowHeight: Style.space(36)
   readonly property int sectionHeight: Style.space(24)
   property var rankedItems: []
   property string selectedItemUuid: ""
@@ -507,6 +507,7 @@ Panel {
               || resultList.activeFocus || keyCatcher.activeFocus)
             && resultList.currentIndex === index
           readonly property string crumb: root.breadcrumb(modelData)
+          readonly property string metadata: Model.vitalMetadata(modelData, crumb)
 
           Accessible.role: Accessible.ListItem
           Accessible.name: String(modelData.title || "Untitled")
@@ -532,67 +533,53 @@ Panel {
             border.color: Color.accent
           }
 
-          Column {
+          Text {
+            id: thingIcon
             anchors.left: parent.left
             anchors.leftMargin: Style.space(8)
-            anchors.right: badgeRow.left
-            anchors.rightMargin: Style.space(6)
             anchors.verticalCenter: parent.verticalCenter
-            spacing: Style.space(1)
-
-            Text {
-              width: parent.width
-              text: String(row.modelData.title || "Untitled")
-              color: root.foreground
-              font.family: Style.font.family
-              font.pixelSize: Style.font.body
-              font.bold: row.highlighted || row.modelData.active === true
-              elide: Text.ElideRight
-            }
-
-            Text {
-              width: parent.width
-              visible: text.length > 0
-              text: row.crumb
-              color: root.dimForeground
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-              elide: Text.ElideMiddle
-            }
+            width: Style.space(24)
+            text: Model.kindIcon(row.modelData.kind)
+            color: row.highlighted || row.modelData.active === true
+              ? root.foreground : root.dimForeground
+            font.family: Style.font.family
+            font.pixelSize: Style.font.icon
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            Accessible.role: Accessible.Graphic
+            Accessible.name: Model.kindLabel(row.modelData.kind) + " icon"
           }
 
-          Row {
-            id: badgeRow
+          Text {
+            id: metadataLabel
             anchors.right: parent.right
-            anchors.rightMargin: Style.space(7)
+            anchors.rightMargin: Style.space(8)
             anchors.verticalCenter: parent.verticalCenter
-            spacing: Style.space(3)
+            visible: text.length > 0
+            width: visible ? Math.min(implicitWidth, resultList.width * 0.4) : 0
+            text: row.metadata
+            color: root.dimForeground
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            horizontalAlignment: Text.AlignRight
+            elide: Text.ElideMiddle
+            Accessible.role: Accessible.StaticText
+            Accessible.name: text
+          }
 
-            Repeater {
-              model: [String(row.modelData.provider || "Local"), Model.kindLabel(row.modelData.kind)]
-                .concat(Array.isArray(row.modelData.badges) ? row.modelData.badges.slice(1, 3) : [])
-
-              Rectangle {
-                id: badge
-                required property string modelData
-                width: badgeLabel.implicitWidth + Style.space(8)
-                height: badgeLabel.implicitHeight + Style.space(3)
-                radius: height / 2
-                color: Style.normalFillFor(root.foreground, Color.accent)
-
-                Text {
-                  id: badgeLabel
-                  anchors.centerIn: parent
-                  text: badge.modelData
-                  color: root.dimForeground
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
-                }
-
-                Accessible.role: Accessible.StaticText
-                Accessible.name: badge.modelData
-              }
-            }
+          Text {
+            id: titleLabel
+            anchors.left: thingIcon.right
+            anchors.leftMargin: Style.space(6)
+            anchors.right: metadataLabel.left
+            anchors.rightMargin: metadataLabel.visible ? Style.space(10) : 0
+            anchors.verticalCenter: parent.verticalCenter
+            text: String(row.modelData.title || "Untitled")
+            color: root.foreground
+            font.family: Style.font.family
+            font.pixelSize: Style.font.body
+            font.bold: row.highlighted || row.modelData.active === true
+            elide: Text.ElideRight
           }
 
           MouseArea {

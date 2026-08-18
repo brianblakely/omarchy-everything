@@ -55,7 +55,9 @@ changes preserve the highlighted UUID and its visual offset when possible.
 It orders exact kind groups deterministically and ranks rows within each group.
 QML owns the accessible section headings and restores visual offset from the
 live selected delegate geometry, falling back to deterministic section geometry
-when that delegate has not been instantiated.
+when that delegate has not been instantiated. The pure model also derives each
+row's kind icon and selects one vital metadata value; QML renders only that
+icon, title, and value on a single line.
 
 ## Helper and provider ownership
 

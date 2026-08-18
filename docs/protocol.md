@@ -84,7 +84,7 @@ Every public item contains:
 | `context` | Cwd, application, workspace, or container context |
 | `searchTerms` | Additional non-rendered matching terms |
 | `parentId` | Parent thing used to build breadcrumbs |
-| `badges` | Status/type annotations |
+| `badges` | Status/type annotations used for search, accessibility, and the row's single vital metadata choice |
 | `active` | Whether this is the provider's current thing |
 | `recency` | Provider-local ranking hint |
 | `activationToken` | Authenticated, process-local opaque activation reference |
