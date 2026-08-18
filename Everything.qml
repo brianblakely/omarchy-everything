@@ -550,6 +550,7 @@ Panel {
 
           Text {
             id: metadataLabel
+            objectName: "everything-metadata-" + row.index
             anchors.right: parent.right
             anchors.rightMargin: Style.space(8)
             anchors.verticalCenter: parent.verticalCenter

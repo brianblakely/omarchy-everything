@@ -52,7 +52,24 @@ function fuzzyScore(haystack, needle) {
 function stringList(value) {
   if (Array.isArray(value)) return value.map(function(entry) { return String(entry) })
   if (value === undefined || value === null || value === "") return []
+  if (typeof value !== "string" && typeof value.length === "number") {
+    var sequence = []
+    for (var index = 0; index < value.length; index++) sequence.push(String(value[index]))
+    return sequence
+  }
   return [String(value)]
+}
+
+function badgeList(value) {
+  var badges = stringList(value)
+  // QML can expose a typed QVariantList to an imported JavaScript library as
+  // one comma-joined string. Provider badges never contain commas, so recover
+  // the protocol list here instead of displaying its serialization.
+  if (badges.length === 1 && badges[0].indexOf(",") >= 0) {
+    return badges[0].split(",").map(function(entry) { return entry.trim() })
+      .filter(function(entry) { return entry.length > 0 })
+  }
+  return badges
 }
 
 function kindLabel(kind) {
@@ -169,7 +186,7 @@ function contextMetadata(item, breadcrumb) {
 
 function vitalMetadata(item, breadcrumb) {
   if (!item) return ""
-  var badges = stringList(item.badges)
+  var badges = badgeList(item.badges)
   var priorities = [
     "error", "blocked", "modified", "working", "scratchpad", "hidden",
     "detached", "unloaded", "visible", "attached", "group", "done", "idle"

@@ -15,7 +15,8 @@ The suite performs:
   group, active/recency order, duplicate identity handling, token
   authentication, and hidden-result persistence;
 - deterministic kind icons, one-line row density, vital-metadata selection,
-  exclusion of redundant kind labels, and absence of visual metadata pills;
+  JavaScript/Qt-list badge normalization, exclusion of redundant kind labels,
+  and absence of visual metadata pills;
 - every documented keyboard alias, focus-sensitive Delete/Backspace ownership,
   safe selection after removal, stationary-pointer filtering, deliberate
   pointer selection, and close-before-activation ordering;

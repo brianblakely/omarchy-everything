@@ -59,7 +59,9 @@ when that delegate has not been instantiated. The pure model also derives each
 row's kind icon and selects one vital metadata value; QML renders only that
 icon, title, and value on a single line. Kind labels are excluded from metadata;
 provider-specific kind-bearing fallbacks are reduced to their useful identity
-or location before display.
+or location before display. Badge normalization accepts both JavaScript arrays
+and Qt typed lists, including their comma-joined bridge representation, before
+the kind filter runs.
 
 ## Helper and provider ownership
 

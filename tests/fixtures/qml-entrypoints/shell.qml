@@ -15,6 +15,7 @@ ShellRoot {
   property string shortListSelection: ""
   property real selectedOffsetBeforeRefresh: 0
   property var rankedBeforeRefresh: null
+  property list<string> qmlWindowBadges: ["Window", "Workspace 1"]
 
   function manifestData(source) {
     return {
@@ -57,7 +58,7 @@ ShellRoot {
         context: "Refresh fixture",
         searchTerms: [],
         parentId: "",
-        badges: [],
+        badges: i === 0 ? root.qmlWindowBadges : [],
         active: false,
         recency: (reverseOrder ? i : 100 - i) + offset,
         activationToken: "token-" + String(tokenGeneration || "one") + "-" + i
@@ -103,6 +104,12 @@ ShellRoot {
       }
       if (!findNamed(widgetObject, "everything-section-window")) {
         failRefreshTest("kind section was not rendered")
+        return
+      }
+      var windowMetadata = findNamed(widgetObject, "everything-metadata-0")
+      if (!windowMetadata || String(windowMetadata.text) !== "Workspace 1") {
+        failRefreshTest("line metadata repeated its kind: "
+          + String(windowMetadata ? windowMetadata.text : "missing"))
         return
       }
       widgetObject.focusList(16)

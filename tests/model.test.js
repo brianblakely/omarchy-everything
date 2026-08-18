@@ -84,6 +84,14 @@ const item = (id, title, context, extra = {}) => ({
     item("window", "Window", "App · workspace 4", { badges: ["Window", "Workspace 4"] }), ""),
     "Workspace 4")
   assert.equal(sandbox.vitalMetadata(
+    item("qt-window", "Window", "App · workspace 1", {
+      badges: { 0: "Window", 1: "Workspace 1", length: 2 },
+    }), ""), "Workspace 1", "Qt-style list metadata excludes the kind")
+  assert.equal(sandbox.vitalMetadata(
+    item("joined-window", "Window", "App · workspace 1", {
+      badges: "Window,Workspace 1",
+    }), ""), "Workspace 1", "comma-serialized badge metadata excludes the kind")
+  assert.equal(sandbox.vitalMetadata(
     item("buffer", "File", "/tmp/file", { kind: "neovim-buffer", badges: ["Buffer", "Modified", "Visible"] }), ""),
     "Modified")
   assert.equal(sandbox.vitalMetadata(
