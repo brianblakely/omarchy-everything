@@ -97,37 +97,33 @@ const item = (id, title, context, extra = {}) => ({
   assert.equal(changed.items[0].title, "Renamed")
 }
 
-const aliases = [
-  ["down", false, false, "", "next"],
-  ["n", true, false, "", "next"],
-  ["up", false, false, "", "previous"],
-  ["p", true, false, "", "previous"],
-  ["home", false, false, "", "first"],
-  ["g", false, false, "g", "first"],
-  ["end", false, false, "", "last"],
-  ["g", false, true, "G", "last"],
-  ["pagedown", false, false, "", "page-next"],
-  ["d", true, false, "", "page-next"],
-  ["pageup", false, false, "", "page-previous"],
-  ["u", true, false, "", "page-previous"],
-  ["enter", false, false, "", "activate"],
-  ["slash", false, false, "/", "search"],
-  ["backspace", false, false, "", "hide"],
-  ["delete", false, false, "", "hide"],
-  ["escape", false, false, "", "escape"],
-]
-for (const [key, ctrl, shift, text, expected] of aliases)
-  assert.equal(sandbox.keyboardAction(key, ctrl, shift, text), expected, `${key} alias`)
-
 const qml = fs.readFileSync(path.join(root, "Everything.qml"), "utf8")
 const searchHandler = qml.slice(qml.indexOf("id: searchField"), qml.indexOf("id: statusText"))
 const listHandler = qml.slice(qml.indexOf("id: resultList"), qml.indexOf("delegate: Item"))
 assert.doesNotMatch(searchHandler, /Key_Backspace|Key_Delete/, "search owns editing keys")
-assert.match(listHandler, /Keys\.onPressed[\s\S]*handleListKey/, "list owns thing commands")
+assert.match(qml, /focusTarget:\s*keyCatcher/, "the shell key catcher receives initial panel focus")
+assert.match(qml, /PanelKeyCatcher\s*\{[\s\S]*blocked:\s*searchField\.activeFocus/,
+  "the standard shell key catcher yields only while search is being edited")
+assert.match(qml, /onMoveRequested:[\s\S]*dy !== 0 \? dy : dx[\s\S]*moveSelection\(delta\)/,
+  "the shell's H J K L and arrow directions drive the list")
+assert.match(qml, /onActivateRequested:\s*root\.activateAt/,
+  "the shell's Enter and Space action activates the selected thing")
+assert.match(qml, /onDeleteRequested:\s*root\.hideAt/,
+  "the shell's X action hides the selected thing")
+assert.match(qml, /onTabRequested:[^\n]*root\.switchPanel\(direction\)/,
+  "the shell owns Tab navigation between panels")
+assert.match(listHandler, /Keys\.onPressed[\s\S]*handleSupplementalListKey/,
+  "the list retains only supplemental page and control-key aliases")
+assert.doesNotMatch(listHandler, /Key_Down|Key_Up|Key_Left|Key_Right|Key_Return|Key_Enter|Key_Tab|Key_Escape/,
+  "the list does not override standard shell navigation")
 assert.match(qml, /Key_Backspace[\s\S]*Key_Delete[\s\S]*action = "hide"/, "Backspace and Delete hide list rows")
 assert.match(qml, /root\.close\(\)[\s\S]*Qt\.callLater[\s\S]*everythingService\.activate/, "panel closes before activation")
 assert.match(qml, /onItemsChanged\(\)[\s\S]*scheduleRankedItems\(true\)/, "provider refresh preserves UI state")
 assert.match(qml, /indexAfterRefresh\(rankedItems, selectedThingId/, "selection is restored by stable thing id")
+assert.doesNotMatch(qml, /centerOnBar\s*:/, "panel uses the shell's default icon anchoring")
+assert.doesNotMatch(qml, /function\s+(?:open|close|togglePanel)\s*\(/,
+  "panel uses the inherited shell lifecycle")
+assert.match(qml, /onPressed:[^\n]*root\.toggle\(\)/, "bar button uses the inherited shell toggle")
 
 const serviceQml = fs.readFileSync(path.join(root, "Service.qml"), "utf8")
 assert.match(serviceQml, /reconcileItems\(items, incoming\)/, "token-only snapshots keep the visible model stable")

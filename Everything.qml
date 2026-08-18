@@ -26,6 +26,7 @@ Panel {
   property real savedSelectedOffset: 0
   property real savedContentY: 0
   property bool savedListFocus: false
+  property bool savedKeyCatcherFocus: false
   property bool savedSearchFocus: false
   property bool savedRefreshFocus: false
   property bool keepRefreshPosition: false
@@ -38,25 +39,6 @@ Panel {
   // can never collide with another monitor or leak a lease after reparenting.
   readonly property string instanceKey: "everything:" + Date.now() + ":"
     + Math.random().toString(36).slice(2)
-
-  function open() {
-    if (root.opened) return
-    root.controller.show()
-    searchField.text = ""
-    if (everythingService) everythingService.acquire(instanceKey)
-    Qt.callLater(function() {
-      if (root.opened) searchField.forceActiveFocus()
-    })
-  }
-
-  function close() {
-    root.controller.hide()
-  }
-
-  function togglePanel() {
-    if (root.opened) root.close()
-    else root.open()
-  }
 
   function focusSearch() {
     searchField.forceActiveFocus()
@@ -119,7 +101,8 @@ Panel {
   }
 
   function rememberFocusState() {
-    savedListFocus = resultList.activeFocus
+    savedKeyCatcherFocus = keyCatcher.activeFocus
+    savedListFocus = resultList.activeFocus || savedKeyCatcherFocus
     savedSearchFocus = searchField.activeFocus
     savedRefreshFocus = refreshButton.activeFocus
   }
@@ -213,7 +196,8 @@ Panel {
       resultList.contentY = resultList.originY
     }
 
-    if (savedListFocus && index >= 0) resultList.forceActiveFocus()
+    if (savedKeyCatcherFocus) keyCatcher.forceActiveFocus()
+    else if (savedListFocus && index >= 0) resultList.forceActiveFocus()
     else if (savedSearchFocus) searchField.forceActiveFocus()
     else if (savedRefreshFocus) refreshButton.forceActiveFocus()
     resultUpdateInProgress = false
@@ -246,23 +230,16 @@ Panel {
     return values.join("  ›  ")
   }
 
-  function handleListKey(event) {
+  function handleSupplementalListKey(event) {
     var ctrl = (event.modifiers & Qt.ControlModifier) !== 0
-    var shift = (event.modifiers & Qt.ShiftModifier) !== 0
     var action = ""
-    if (event.key === Qt.Key_Down) action = "next"
-    else if (event.key === Qt.Key_Up) action = "previous"
-    else if (ctrl && event.key === Qt.Key_N) action = "next"
+    if (ctrl && event.key === Qt.Key_N) action = "next"
     else if (ctrl && event.key === Qt.Key_P) action = "previous"
-    else if (event.key === Qt.Key_Home || (!ctrl && !shift && event.text === "g")) action = "first"
-    else if (event.key === Qt.Key_End || (!ctrl && event.text === "G")) action = "last"
+    else if (event.key === Qt.Key_Home) action = "first"
+    else if (event.key === Qt.Key_End) action = "last"
     else if (event.key === Qt.Key_PageDown || (ctrl && event.key === Qt.Key_D)) action = "page-next"
     else if (event.key === Qt.Key_PageUp || (ctrl && event.key === Qt.Key_U)) action = "page-previous"
-    else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) action = "activate"
-    else if (event.key === Qt.Key_Slash || event.text === "/") action = "search"
     else if (event.key === Qt.Key_Backspace || event.key === Qt.Key_Delete) action = "hide"
-    else if (event.key === Qt.Key_Escape) action = "escape"
-    else if (event.key === Qt.Key_Backtab || (event.key === Qt.Key_Tab && shift)) action = "search"
 
     if (!action) return
     event.accepted = true
@@ -272,16 +249,14 @@ Panel {
     else if (action === "last") focusList(resultList.count - 1)
     else if (action === "page-next") moveSelection(pageSize())
     else if (action === "page-previous") moveSelection(-pageSize())
-    else if (action === "activate") activateAt(resultList.currentIndex)
-    else if (action === "search") focusSearch()
     else if (action === "hide") hideAt(resultList.currentIndex)
-    else if (action === "escape") handleEscape()
   }
 
   onOpenedChanged: {
     if (root.opened) {
+      searchField.text = ""
       if (everythingService) everythingService.acquire(instanceKey)
-      Qt.callLater(function() { searchField.forceActiveFocus() })
+      Qt.callLater(function() { keyCatcher.forceActiveFocus() })
     } else if (everythingService) {
       everythingService.release(instanceKey)
     }
@@ -312,17 +287,17 @@ Panel {
     active: root.opened
     tooltipText: "Everything"
     activeFocusOnTab: true
-    Keys.onReturnPressed: root.togglePanel()
-    Keys.onEnterPressed: root.togglePanel()
-    Keys.onSpacePressed: root.togglePanel()
-    onPressed: function(_buttonCode) { root.togglePanel() }
+    Keys.onReturnPressed: root.toggle()
+    Keys.onEnterPressed: root.toggle()
+    Keys.onSpacePressed: root.toggle()
+    onPressed: function(_buttonCode) { root.toggle() }
 
     Accessible.role: Accessible.Button
     Accessible.name: "Open Everything"
     Accessible.description: "Search windows, tabs, panes, sessions, agents, and buffers"
     Accessible.focusable: true
     Accessible.focused: activeFocus
-    Accessible.onPressAction: root.togglePanel()
+    Accessible.onPressAction: root.toggle()
 
     Rectangle {
       anchors.fill: parent
@@ -341,16 +316,35 @@ Panel {
     owner: root
     bar: root.bar
     open: root.opened
-    focusTarget: searchField
-    centerOnBar: true
+    focusTarget: keyCatcher
     contentWidth: popup.fittedContentWidth(Style.space(620))
     contentHeight: popup.cappedContentHeight(Style.space(620))
 
-    Item {
-      id: content
+    PanelKeyCatcher {
+      id: keyCatcher
+      objectName: "everything-key-catcher"
       anchors.fill: parent
-      Accessible.role: Accessible.Pane
-      Accessible.name: "Everything search and switch panel"
+      blocked: searchField.activeFocus
+
+      onMoveRequested: function(dx, dy) {
+        var delta = dy !== 0 ? dy : dx
+        if (delta !== 0) root.moveSelection(delta)
+      }
+      onActivateRequested: root.activateAt(resultList.currentIndex)
+      onCloseRequested: root.handleEscape()
+      onDeleteRequested: root.hideAt(resultList.currentIndex)
+      onTabRequested: function(direction) { root.switchPanel(direction) }
+      onTextKey: function(text) {
+        if (text === "/") root.focusSearch()
+        else if (text === "g") root.focusList(0)
+        else if (text === "G") root.focusList(resultList.count - 1)
+      }
+
+      Item {
+        id: content
+        anchors.fill: parent
+        Accessible.role: Accessible.Pane
+        Accessible.name: "Everything search and switch panel"
 
       Row {
         id: heading
@@ -464,12 +458,12 @@ Panel {
         highlightMoveDuration: 80
         Accessible.role: Accessible.List
         Accessible.name: "Ranked thing list"
-        Accessible.description: "Use arrow keys to select and Enter to switch"
+        Accessible.description: "Use arrow keys or H J K L to select and Enter to switch"
         Accessible.focusable: count > 0
         Accessible.focused: activeFocus
 
         Keys.priority: Keys.BeforeItem
-        Keys.onPressed: function(event) { root.handleListKey(event) }
+        Keys.onPressed: function(event) { root.handleSupplementalListKey(event) }
         onCountChanged: {
           if (!root.resultUpdateInProgress) {
             if (count <= 0) root.setCurrentIndex(-1, false)
@@ -486,7 +480,8 @@ Panel {
           required property int index
           width: resultList.width
           height: root.rowHeight
-          readonly property bool highlighted: resultList.activeFocus && resultList.currentIndex === index
+          readonly property bool highlighted: (resultList.activeFocus || keyCatcher.activeFocus)
+            && resultList.currentIndex === index
           readonly property string crumb: root.breadcrumb(modelData)
 
           Accessible.role: Accessible.ListItem
@@ -596,15 +591,16 @@ Panel {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         height: Style.space(20)
-        text: "↑↓ move  ·  Enter switch  ·  / search  ·  Delete hide  ·  Esc clear/close"
+        text: "HJKL/↑↓ move  ·  Enter switch  ·  / search  ·  X hide  ·  Esc clear/close"
         color: root.dimForeground
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
         Accessible.role: Accessible.StaticText
-        Accessible.name: "Keyboard help: arrows move, Enter switches, slash searches, Delete hides, Escape clears or closes"
+        Accessible.name: "Keyboard help: H J K L or arrows move, Enter switches, slash searches, X hides, Escape clears or closes"
       }
     }
   }
+}
 }

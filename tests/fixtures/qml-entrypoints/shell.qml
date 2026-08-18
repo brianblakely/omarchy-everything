@@ -9,6 +9,7 @@ ShellRoot {
   property var widgetObject: null
   property var searchObject: null
   property var listObject: null
+  property var keyCatcherObject: null
   property int refreshTestStage: 0
   property string selectedBeforeRefresh: ""
   property string anchorBeforeRefresh: ""
@@ -77,7 +78,8 @@ ShellRoot {
     if (refreshTestStage === 0) {
       searchObject = findNamed(widgetObject, "everything-search")
       listObject = findNamed(widgetObject, "everything-results")
-      if (!searchObject || !listObject) {
+      keyCatcherObject = findNamed(widgetObject, "everything-key-catcher")
+      if (!searchObject || !listObject || !keyCatcherObject) {
         failRefreshTest("controls not found")
         return
       }
@@ -90,6 +92,16 @@ ShellRoot {
         return
       }
       widgetObject.focusList(16)
+      keyCatcherObject.moveRequested(0, 1)
+      if (listObject.currentIndex !== 17) {
+        failRefreshTest("shell vertical movement was not routed")
+        return
+      }
+      keyCatcherObject.moveRequested(-1, 0)
+      if (listObject.currentIndex !== 16) {
+        failRefreshTest("shell horizontal movement was not routed")
+        return
+      }
       listObject.contentY = listObject.originY + widgetObject.rowHeight * 14 + 7
       selectedBeforeRefresh = resultId(listObject.currentIndex)
       var top = Math.floor((listObject.contentY - listObject.originY) / widgetObject.rowHeight)

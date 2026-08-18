@@ -61,6 +61,10 @@ single refresh followed by a visible stale notification.
 - Multiple monitors: invoke the shell shortcut while each monitor is focused;
   only that monitor's widget opens. Open two panels by pointer to confirm the
   helper remains leased until both close.
+- Confirm the shell key catcher owns initial focus: H/K and J/L move backward
+  and forward like the arrow keys, Enter/Space activates, X hides, and Tab
+  follows Omarchy's adjacent-panel navigation. Press `/` to edit search and
+  confirm H, J, K, and L then insert text instead of moving the selection.
 - Managed clients across numbered workspaces, a special scratchpad, a group,
   hidden state, and duplicate titles. Confirm layers do not appear.
 - Confirm Foot and Alacritty expose their exact separate Hyprland windows but

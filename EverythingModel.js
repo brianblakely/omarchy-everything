@@ -253,23 +253,6 @@ function reconcileItems(currentItems, incomingItems) {
   return { items: next, changed: true }
 }
 
-// Canonical names used by both the QML key handler and its table-driven tests.
-function keyboardAction(key, ctrl, shift, text) {
-  var name = String(key || "").toLowerCase()
-  var typed = String(text || "")
-  if (name === "down" || (ctrl && name === "n")) return "next"
-  if (name === "up" || (ctrl && name === "p")) return "previous"
-  if (name === "home" || (!ctrl && !shift && typed === "g")) return "first"
-  if (name === "end" || (!ctrl && typed === "G")) return "last"
-  if (name === "pagedown" || (ctrl && name === "d")) return "page-next"
-  if (name === "pageup" || (ctrl && name === "u")) return "page-previous"
-  if (name === "return" || name === "enter") return "activate"
-  if (name === "slash" || typed === "/") return "search"
-  if (name === "backspace" || name === "delete") return "hide"
-  if (name === "escape") return "escape"
-  return ""
-}
-
 function mergeProviderItems(providerItems) {
   var out = []
   var seen = {}

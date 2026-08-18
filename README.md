@@ -62,21 +62,25 @@ Lua config, validate it with `hyprctl reload` and `hyprctl configerrors`.
 
 ## Keyboard controls
 
-Search owns focus whenever the panel opens. Printable input, Backspace, and
-Delete edit the query there. Every space-separated query token must fuzzily
-match a title, breadcrumb/context, provider, type, badge, or search term;
-title matches rank first, followed by context/type, the current thing, and
-recency.
+The panel opens in Omarchy's standard keyboard-navigation mode. Press `/` or
+click the search field to edit the query; while editing, every printable key,
+including H, J, K, and L, belongs to the search field. Every space-separated
+query token must fuzzily match a title, breadcrumb/context, provider, type,
+badge, or search term; title matches rank first, followed by context/type, the
+current thing, and recency.
 
 | Focus | Keys | Action |
 |---|---|---|
-| Search | `Down`, `Tab` | Highlight the first result and move focus to the list |
-| List | `Up`, `Down`, `Ctrl+P`, `Ctrl+N` | Move one result |
-| List | `Home`, `End`, `g`, `G` | Move to the first or last result |
-| List | `Page Up`, `Page Down`, `Ctrl+U`, `Ctrl+D` | Move one visible page |
-| List | `Enter` | Close Everything, then activate the highlighted thing |
-| List | `/`, `Shift+Tab` | Return to search |
-| List | `Backspace`, `Delete` | Hide only the actively highlighted result |
+| Navigation | `H`, `K`, `Left`, `Up` | Move to the previous result |
+| Navigation | `J`, `L`, `Down`, `Right` | Move to the next result |
+| Navigation | `Home`, `End`, `g`, `G` | Move to the first or last result |
+| Navigation | `Page Up`, `Page Down`, `Ctrl+U`, `Ctrl+D` | Move one visible page |
+| Navigation | `Ctrl+P`, `Ctrl+N` | Move to the previous or next result |
+| Navigation | `Enter`, `Space` | Close Everything, then activate the highlighted thing |
+| Navigation | `/` | Focus the search field |
+| Navigation | `X`, `Backspace`, `Delete` | Hide only the actively highlighted result |
+| Navigation | `Tab`, `Shift+Tab` | Use Omarchy's standard adjacent-panel navigation |
+| Search | `Down`, `Tab` | Return to navigation at the first result |
 | Either | `Escape` | Clear a nonempty query and return to search; a second press closes |
 
 Hidden IDs stay filtered across refreshes and panel reopenings. They are held
