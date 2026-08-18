@@ -3,6 +3,78 @@
 // Pure model helpers. Keep this file free of QML object references so the
 // ranking and keyboard rules can also be exercised by the Node test fixture.
 
+// App glyphs assigned by Omarchy's current default menu and supplied by its
+// default JetBrainsMono Nerd Font package. Matching stays exact so a web-app
+// class such as "chrome-chatgpt.com__-Default" does not become Chrome.
+var APP_GLYPHS = {
+  "1password": "\udb82\udc81",
+  "alacritty": "\ue795",
+  "app.zen_browser.zen": "\udb81\udd9f",
+  "bitwarden": "\udb81\udff5",
+  "brave": "\udb81\udd9f",
+  "brave-browser": "\udb81\udd9f",
+  "brave-origin": "\udb81\udd9f",
+  "chrome": "\udb80\udeaf",
+  "chromium": "\uf268",
+  "chromium-browser": "\uf268",
+  "code": "\ue8da",
+  "code-oss": "\ue8da",
+  "com.1password.1password": "\udb82\udc81",
+  "com.bitwarden.desktop": "\udb81\udff5",
+  "com.brave.browser": "\udb81\udd9f",
+  "com.google.chrome": "\udb80\udeaf",
+  "com.heroicgameslauncher.hgl": "\udb85\udcdf",
+  "com.microsoft.edge": "\udb80\udde9",
+  "com.mitchellh.ghostty": "\ue795",
+  "com.spotify.client": "\udb81\udcc7",
+  "com.valvesoftware.steam": "\uf1b6",
+  "com.visualstudio.code": "\ue8da",
+  "com.vscodium.codium": "\ue8da",
+  "dropbox": "\ue707",
+  "edge": "\udb80\udde9",
+  "firefox": "\udb80\ude39",
+  "firefox-esr": "\udb80\ude39",
+  "foot": "\ue795",
+  "ghostty": "\ue795",
+  "google-chrome": "\udb80\udeaf",
+  "google-chrome-stable": "\udb80\udeaf",
+  "heroic": "\udb85\udcdf",
+  "heroic games launcher": "\udb85\udcdf",
+  "io.neovim.nvim": "\ue6ae",
+  "kitty": "\ue795",
+  "lutris": "\uef94",
+  "microsoft-edge": "\udb80\udde9",
+  "microsoft-edge-stable": "\udb80\udde9",
+  "minecraft": "\udb80\udf73",
+  "minecraft-launcher": "\udb80\udf73",
+  "net.lutris.lutris": "\uef94",
+  "neovim": "\ue6ae",
+  "nvim": "\ue6ae",
+  "org.codeberg.dnkl.foot": "\ue795",
+  "org.libretro.retroarch": "\udb82\udfc9",
+  "org.mozilla.firefox": "\udb80\ude39",
+  "org.omarchy.nvim": "\ue6ae",
+  "org.signal.signal": "\udb82\udf79",
+  "retroarch": "\udb82\udfc9",
+  "signal": "\udb82\udf79",
+  "signal-desktop": "\udb82\udf79",
+  "spotify": "\udb81\udcc7",
+  "steam": "\uf1b6",
+  "vim": "\ue62b",
+  "visual studio code": "\ue8da",
+  "vscode": "\ue8da",
+  "xbox cloud gaming": "\ued3e",
+  "zen": "\udb81\udd9f",
+  "zen-browser": "\udb81\udd9f"
+}
+
+// These identities are safe only after resolving a desktop entry. In
+// particular, a raw class named "docker" need not represent Docker Desktop.
+var ENTRY_ONLY_APP_GLYPHS = {
+  "com.docker.desktop": "\uf21f",
+  "docker": "\uf21f"
+}
+
 function normalized(value) {
   var text = String(value === undefined || value === null ? "" : value).toLowerCase()
   try {
@@ -173,6 +245,36 @@ function entryIdentities(entry) {
     executableName(objectString(entry, "execString")),
     iconIdentity(objectString(entry, "icon"))
   ]
+}
+
+function mappedGlyph(identities, mapping) {
+  for (var index = 0; index < identities.length; index++) {
+    if (Object.prototype.hasOwnProperty.call(mapping, identities[index]))
+      return mapping[identities[index]]
+  }
+  return ""
+}
+
+function windowAppGlyph(item, entry) {
+  if (!item || String(item.kind || "") !== "window") return ""
+
+  var identities = entryIdentities(entry)
+  var glyph = mappedGlyph(identities, APP_GLYPHS)
+    || mappedGlyph(identities, ENTRY_ONLY_APP_GLYPHS)
+  if (glyph) return glyph
+  // A resolved web-app entry owns its image identity. Do not fall through to
+  // an incidental browser class and replace that app image with Chrome, Brave,
+  // or another host-browser glyph.
+  if (entry && webIdentityFromEntry(entry)) return ""
+
+  var hints = iconHintList(item)
+  var hintIdentities = []
+  for (var index = 0; index < hints.length; index++) {
+    var identity = desktopId(hints[index])
+    if (identity && hintIdentities.indexOf(identity) < 0)
+      hintIdentities.push(identity)
+  }
+  return mappedGlyph(hintIdentities, APP_GLYPHS)
 }
 
 function matchDesktopEntry(iconHints, entries) {
@@ -415,6 +517,15 @@ function metadataForItem(item, byId) {
     parentTitleFromIndex(item, byId))
 }
 
+function metadataSortBucket(item, metadata) {
+  if (!item || String(item.kind || "") !== "window") return 0
+  var badges = badgeList(item.badges)
+  for (var index = 0; index < badges.length; index++) {
+    if (normalized(badges[index]) === "scratchpad") return 1
+  }
+  return normalized(metadata) === "scratchpad" ? 1 : 0
+}
+
 function naturalCompare(left, right) {
   var a = normalized(left)
   var b = normalized(right)
@@ -511,9 +622,11 @@ function rankedEntry(item, tokens, sourceIndex, relations) {
   if (!isFinite(recency)) recency = 0
   // Keep ranking fields separate so even an unusually long query cannot
   // overflow a numeric bucket and invert the documented lexicographic order.
+  var metadata = metadataForItem(item, relations)
   return {
     item: item,
-    metadata: metadataForItem(item, relations),
+    metadata: metadata,
+    metadataBucket: metadataSortBucket(item, metadata),
     titleHits: titleHits,
     groupHits: groupHits,
     quality: quality,
@@ -538,6 +651,8 @@ function rank(items, query, hiddenIds) {
   ranked.sort(function(a, b) {
     var groupOrder = kindOrder(a.item.kind) - kindOrder(b.item.kind)
     if (groupOrder !== 0) return groupOrder
+    if (a.metadataBucket !== b.metadataBucket)
+      return a.metadataBucket - b.metadataBucket
     var metadataOrder = naturalCompare(a.metadata, b.metadata)
     if (metadataOrder !== 0) return metadataOrder
     var fields = ["titleHits", "groupHits", "quality", "active", "recency"]

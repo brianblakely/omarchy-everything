@@ -55,7 +55,7 @@ ShellRoot {
         kind: kinds[Math.floor(i / 10)],
         provider: "Test",
         title: "Shared thing",
-        iconHints: i < 10 ? ["foot"] : [],
+        iconHints: i === 0 ? ["foot"] : (i === 1 ? ["folder"] : []),
         context: "Refresh fixture",
         searchTerms: [],
         parentId: "",
@@ -108,9 +108,14 @@ ShellRoot {
         failRefreshTest("kind section was not rendered")
         return
       }
-      var windowIcon = findNamed(widgetObject, "everything-window-icon-0")
+      var windowGlyph = findNamed(widgetObject, "everything-window-glyph-0")
+      if (!windowGlyph || String(windowGlyph.text || "").length === 0) {
+        failRefreshTest("known window glyph was not resolved")
+        return
+      }
+      var windowIcon = findNamed(widgetObject, "everything-window-icon-1")
       if (!windowIcon || String(windowIcon.source || "").length === 0) {
-        failRefreshTest("Hyprland window icon was not resolved")
+        failRefreshTest("fallback window image was not resolved")
         return
       }
       var windowMetadata = findNamed(widgetObject, "everything-metadata-0")

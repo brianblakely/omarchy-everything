@@ -11,9 +11,12 @@ Layer surfaces are outside the clients API and are not results.
 Window presentation also retains the client's ordered icon hint, class,
 initial class, and initial title. QML resolves those Hyprland-reported values
 against the shell's current desktop entries, including the host/path identity
-used by Omarchy web apps. A direct icon hint wins when present; an unresolved
-client uses the generic window glyph. These hints are display-only and never
-participate in activation identity.
+used by Omarchy web apps. An exact identity in Omarchy's current default app
+map uses its Nerd Font glyph. Other clients use the resolved desktop-entry or
+direct-hint image, recolored to the same foreground as a glyph; an unresolved
+client uses the generic window glyph. Entry-only identities are never inferred
+from a raw class, and web apps do not inherit their host browser's glyph. These
+hints are display-only and never participate in activation identity.
 
 Foot and Alacritty have no internal Linux tab/split adapter in the supported
 versions, so their only native things are their exact managed windows. tmux,

@@ -113,6 +113,11 @@ const item = (id, title, context, extra = {}) => ({
 
 {
   const rows = [
+    item("scratchpad", "Alpha scratchpad", "", {
+      badges: ["Window", "Workspace special:scratch", "Scratchpad"],
+      active: true,
+      recency: 4000,
+    }),
     item("workspace-10", "Alpha", "", {
       badges: ["Window", "Workspace 10"], active: true, recency: 4000,
     }),
@@ -125,8 +130,8 @@ const item = (id, title, context, extra = {}) => ({
   ]
   assert.deepEqual(
     Array.from(sandbox.rank(rows, "alpha", {}), row => row.id),
-    ["workspace-1", "workspace-2", "workspace-10"],
-    "displayed metadata is the primary natural sort key within a group",
+    ["workspace-1", "workspace-2", "workspace-10", "scratchpad"],
+    "window metadata sorts naturally with Scratchpad after regular workspaces",
   )
 }
 
@@ -172,6 +177,30 @@ const item = (id, title, context, extra = {}) => ({
     "chrome-app.slack.com__client_T0BD9A3HVQF-Default",
     "app.slack.com_/client/T0BD9A3HVQF",
   ], entries), entries[1], "Hyprland web-app identity resolves its own icon")
+  assert.equal(sandbox.windowAppGlyph(
+    item("foot-window", "Foot", "", { iconHints: ["foot"] }), entries[0]),
+    "\ue795", "known Omarchy apps use their default-font glyph")
+  assert.equal(sandbox.windowAppGlyph(item("ghostty-window", "Ghostty", "", {
+    iconHints: ["com.mitchellh.ghostty"],
+  }), null), "\ue795", "an exact Hyprland app identity can select a known glyph")
+  assert.equal(sandbox.windowAppGlyph(item("slack-window", "Slack", "", {
+    iconHints: [
+      "chrome-app.slack.com__client_T0BD9A3HVQF-Default",
+      "google-chrome",
+    ],
+  }), entries[1]), "", "web apps do not inherit their host browser's glyph")
+  assert.equal(sandbox.windowAppGlyph(item("docker-window", "Docker", "", {
+    iconHints: ["unrelated-class"],
+  }), {
+    id: "com.docker.desktop.desktop", name: "Docker Desktop",
+    startupClass: "", execString: "docker-desktop", icon: "docker",
+  }), "\uf21f", "entry-only identities select a glyph after desktop-entry resolution")
+  assert.equal(sandbox.windowAppGlyph(item("raw-docker", "Docker", "", {
+    iconHints: ["docker"],
+  }), null), "", "entry-only identities never match an unverified raw class")
+  assert.equal(sandbox.windowAppGlyph(item("not-window", "Foot", "", {
+    kind: "terminal-pane", iconHints: ["foot"],
+  }), entries[0]), "", "app glyph mapping is limited to managed-window rows")
   assert.equal(sandbox.vitalMetadata(
     item("window", "Window", "App · workspace 4", { badges: ["Window", "Workspace 4"] }), ""),
     "Workspace 4")
@@ -352,8 +381,21 @@ assert.match(qml, /readonly property real rowHeight:\s*Style\.font\.body \* 1\.5
   "result row height scales to one and a half times the thing-name font")
 assert.match(qml, /section\.property:\s*"kind"[\s\S]*section\.delegate:[\s\S]*Accessible\.Heading/,
   "the list renders accessible kind headings")
+assert.match(qml, /import QtQuick\.Effects/,
+  "the window image fallback can use the shell-compatible color effect")
+assert.match(qml, /id:\s*mappedWindowGlyph[\s\S]*text:\s*row\.windowAppGlyph/,
+  "known Omarchy apps render their default-font glyph")
 assert.match(qml, /id:\s*applicationIcon[\s\S]*source:\s*row\.windowIconSource/,
-  "window rows display the icon resolved from Hyprland identity")
+  "unmapped window rows display the image resolved from Hyprland identity")
+const applicationIconHandler = qml.slice(qml.indexOf("id: applicationIcon"),
+  qml.indexOf("id: mappedWindowGlyph", qml.indexOf("id: applicationIcon")))
+assert.match(applicationIconHandler, /visible:\s*row\.windowAppGlyph\.length === 0/,
+  "a known glyph takes precedence over the application image")
+assert.match(applicationIconHandler,
+  /MultiEffect[\s\S]*colorization:\s*1\.0[\s\S]*colorizationColor:\s*row\.highlighted\s*\?\s*root\.foreground\s*:\s*root\.dimForeground/,
+  "application images use the same selected and unselected colors as glyphs")
+assert.doesNotMatch(applicationIconHandler, /modelData\.active/,
+  "the provider's current marker does not brighten a colored application image")
 assert.match(qml, /id:\s*fallbackThingIcon[\s\S]*Model\.kindIcon\(row\.modelData\.kind\)/,
   "rows retain a deterministic glyph fallback")
 const fallbackIconHandler = qml.slice(qml.indexOf("id: fallbackThingIcon"),

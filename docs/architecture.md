@@ -57,18 +57,24 @@ metadata may change without replacing the visible list. A UI update is needed
 only when the ordered UUID sequence or a rendered trait changes; genuine list
 changes preserve the highlighted UUID and its visual offset when possible.
 It orders exact kind groups deterministically, then sorts rows naturally by
-their displayed metadata within each group. Search relevance, current state,
-and recency are tie-breakers only. Parent-derived Herdr metadata is resolved
-from the complete source set before query and hidden-ID filtering.
+their displayed metadata within each group. Windows use one preceding bucket
+for regular workspace rows and one trailing bucket for Scratchpad. Search
+relevance, current state, and recency are tie-breakers only. Parent-derived
+Herdr metadata is resolved from the complete source set before query and
+hidden-ID filtering.
 Query tokens match only the title and the exact displayed group label; context,
 provider, badges, and provider search terms never enter matching.
 QML owns the accessible section headings and restores visual offset from the
 live selected delegate geometry, falling back to deterministic section geometry
 when that delegate has not been instantiated. The pure model also derives each
 row's fallback kind glyph, matches Hyprland window icon hints to the shell's
-current desktop entries, and selects one vital metadata value. QML renders only
-that icon, title, and value on a single line. Herdr agent rows reuse the shell's
-agent-usage robot glyph. Kind labels are excluded from metadata;
+current desktop entries, selects a known glyph from Omarchy's current default
+app map, and chooses one vital metadata value. QML renders that mapped glyph
+first; otherwise it recolors the resolved application image with the same
+highlight-aware foreground used by glyphs, then falls back to the generic
+window glyph. Each row contains only that icon, title, and value on a single
+line. Herdr agent rows reuse the shell's agent-usage robot glyph. Kind labels
+are excluded from metadata;
 provider-specific kind-bearing fallbacks are reduced to their useful identity
 or location before display. Badge normalization accepts both JavaScript arrays
 and Qt typed lists, including their comma-joined bridge representation, before

@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Effects
 import Quickshell
 import qs.Commons
 import qs.Ui
@@ -245,10 +246,10 @@ Panel {
     return source && source !== generic ? source : ""
   }
 
-  function windowIconSource(item) {
+  function resolveWindowDesktopEntry(item) {
     if (!item || String(item.kind || "") !== "window") return ""
     var hints = Model.iconHintList(item)
-    if (hints.length === 0) return ""
+    if (hints.length === 0) return null
 
     var entry = Model.matchDesktopEntry(hints, desktopEntries)
     if (!entry) {
@@ -256,6 +257,15 @@ Panel {
         try { entry = DesktopEntries.heuristicLookup(hints[lookup]) } catch (_error) { }
       }
     }
+    return entry || null
+  }
+
+  function windowIconSource(item, resolvedEntry) {
+    if (!item || String(item.kind || "") !== "window") return ""
+    var hints = Model.iconHintList(item)
+    if (hints.length === 0) return ""
+
+    var entry = resolvedEntry || resolveWindowDesktopEntry(item)
     if (entry && entry.icon) {
       if (appLibrary && typeof appLibrary.iconSource === "function") {
         var librarySource = usableIconSource(appLibrary.iconSource(entry.icon))
@@ -503,7 +513,10 @@ Panel {
           readonly property string crumb: root.breadcrumb(modelData)
           readonly property string metadata: Model.metadataForItem(
             modelData, root.itemRelations)
-          readonly property string windowIconSource: root.windowIconSource(modelData)
+          readonly property var windowEntry: root.resolveWindowDesktopEntry(modelData)
+          readonly property string windowAppGlyph: Model.windowAppGlyph(modelData, windowEntry)
+          readonly property string windowIconSource: windowAppGlyph.length === 0
+            ? root.windowIconSource(modelData, windowEntry) : ""
 
           Accessible.role: Accessible.ListItem
           Accessible.name: String(modelData.title || "Untitled")
@@ -542,19 +555,36 @@ Panel {
               anchors.centerIn: parent
               width: Math.min(parent.width, Style.font.icon)
               height: width
-              visible: row.windowIconSource.length > 0 && status !== Image.Error
+              visible: row.windowAppGlyph.length === 0
+                && row.windowIconSource.length > 0 && status !== Image.Error
               source: row.windowIconSource
               fillMode: Image.PreserveAspectFit
               asynchronous: true
               smooth: true
               sourceSize.width: width
               sourceSize.height: height
+              layer.enabled: visible
+              layer.effect: MultiEffect {
+                colorization: 1.0
+                colorizationColor: row.highlighted ? root.foreground : root.dimForeground
+              }
+            }
+
+            OpticalGlyph {
+              id: mappedWindowGlyph
+              objectName: "everything-window-glyph-" + row.index
+              anchors.fill: parent
+              visible: row.windowAppGlyph.length > 0
+              text: row.windowAppGlyph
+              color: row.highlighted ? root.foreground : root.dimForeground
+              fontFamily: Style.font.family
+              fontSize: Style.font.icon
             }
 
             Text {
               id: fallbackThingIcon
               anchors.fill: parent
-              visible: !applicationIcon.visible
+              visible: row.windowAppGlyph.length === 0 && !applicationIcon.visible
               text: Model.kindIcon(row.modelData.kind)
               color: row.highlighted ? root.foreground : root.dimForeground
               font.family: Style.font.family
