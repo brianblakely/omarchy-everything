@@ -43,6 +43,8 @@ focus target and never exposes a hidden row to activation or removal. Each
 opening clears and focuses search, expands every group, selects the first ranked
 thing, and resets the list to its scroll origin. UUID and visual-offset
 preservation applies only to refreshes while that opening remains active.
+Any keyboard path that reaches the first ranked thing also resets the list to
+its scroll origin; pointer selection and refresh reconciliation do not.
 Pointer-driven selection passes through the
 shell's `PointerMoveGate`; opening, keyboard navigation, and list mutations
 reset that gate so delegates appearing beneath a stationary pointer cannot

@@ -432,6 +432,14 @@ assert.match(qml, /readonly property real rowHeight:\s*Style\.font\.body \* 1\.5
   "result row height scales to one and a half times the thing-name font")
 assert.match(qml, /section\.property:\s*"kind"[\s\S]*section\.delegate:[\s\S]*Accessible\.Heading/,
   "the list renders accessible kind headings")
+const scrollBarHandler = qml.slice(qml.indexOf("ScrollBar.vertical"),
+  qml.indexOf("delegate: Item", qml.indexOf("ScrollBar.vertical")))
+assert.match(scrollBarHandler, /leftPadding:\s*Style\.space\(4\)[\s\S]*rightPadding:\s*0/,
+  "the native scrollbar nub is shifted toward the panel edge")
+assert.match(scrollBarHandler, /palette\.mid:\s*Color\.accent[\s\S]*palette\.dark:\s*Color\.accent/,
+  "the native scrollbar nub uses the theme accent")
+assert.doesNotMatch(scrollBarHandler, /contentItem:|background:/,
+  "scrollbar placement and color do not replace the native control")
 assert.match(qml, /id:\s*sectionHeading[\s\S]*readonly property bool collapsed:[\s\S]*Accessible\.focused:\s*highlighted/,
   "a collapsed group leaves its accessible heading as the visible focus target")
 assert.match(resultDelegateHandler,

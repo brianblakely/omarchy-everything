@@ -94,8 +94,17 @@ ShellRoot {
       searchObject = findNamed(widgetObject, "everything-search")
       listObject = findNamed(widgetObject, "everything-results")
       keyCatcherObject = findNamed(widgetObject, "everything-key-catcher")
+      var listScrollbar = findNamed(widgetObject, "everything-scrollbar")
       if (!searchObject || !listObject || !keyCatcherObject) {
         failRefreshTest("controls not found")
+        return
+      }
+      if (!listScrollbar || listScrollbar.leftPadding <= listScrollbar.rightPadding) {
+        failRefreshTest("scrollbar was not shifted right")
+        return
+      }
+      if (String(listScrollbar.palette.mid) !== String(listScrollbar.palette.dark)) {
+        failRefreshTest("scrollbar nub does not use one theme color")
         return
       }
       if (!barButton || !barChevron) {
@@ -138,6 +147,14 @@ ShellRoot {
       if (!windowMetadata || String(windowMetadata.text) !== "Workspace 1") {
         failRefreshTest("line metadata repeated its kind: "
           + String(windowMetadata ? windowMetadata.text : "missing"))
+        return
+      }
+      widgetObject.focusList(1)
+      listObject.contentY = listObject.originY + widgetObject.rowTopAt(8)
+      keyCatcherObject.moveRequested(0, -1)
+      if (listObject.currentIndex !== 0
+          || Math.abs(listObject.contentY - listObject.originY) > 0.01) {
+        failRefreshTest("keyboard movement to first row did not reset scroll")
         return
       }
       widgetObject.focusList(16)

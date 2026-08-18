@@ -24,10 +24,13 @@ The suite performs:
   metadata, and absence of visual metadata pills;
 - absence of panel scan, count, warning, and empty-result messages while
   automatic discovery continues;
+- native list-scrollbar placement with a right-shifted nub using the current
+  theme accent palette;
 - every documented keyboard alias, horizontal group collapse/expand, vertical
   skipping of hidden rows, focus-sensitive Delete/Backspace ownership, safe
-  selection after removal, stationary-pointer filtering, deliberate pointer
-  selection, and close-before-activation ordering;
+  selection after removal, keyboard-to-first scroll reset, stationary-pointer
+  filtering, deliberate pointer selection, and close-before-activation
+  ordering;
 - argv injection rejection, command timeout/kill behavior, JSON-lines request
   correlation, malformed-request recovery, and stale-token rejection;
 - partial provider streaming, provider failure isolation, stale-row removal,
@@ -78,10 +81,12 @@ single refresh followed by a visible stale notification.
   only that monitor's widget opens. Open two panels by pointer to confirm the
   helper remains leased until both close.
 - Confirm search owns initial focus and printable input edits it immediately.
-  Press Down or Tab to enter navigation, then confirm H/K and J/L move backward
-  and forward like the arrow keys, Enter/Space activates, X hides, and Tab
-  follows Omarchy's adjacent-panel navigation. Press `/` to return to search
-  and confirm H, J, K, and L insert text instead of moving the selection.
+  Press Down or Tab to enter navigation, then confirm K/J move backward/forward
+  like Up/Down and H/L collapse/expand like Left/Right. Enter/Space activates,
+  X hides, and Tab follows Omarchy's adjacent-panel navigation. Press `/` to
+  return to search and confirm H, J, K, and L insert text instead of moving the
+  selection. Scroll down, then reach the first result with Up, K, Home, or `g`;
+  confirm the list returns fully to the top.
 - Managed clients across numbered workspaces, a special scratchpad, a group,
   hidden state, and duplicate titles. Confirm layers do not appear.
 - Confirm Foot and Alacritty expose their exact separate Hyprland windows but

@@ -79,6 +79,8 @@ Panel {
     if (resultList.count <= 0) return
     disarmPointer()
     setCurrentIndex(index === undefined ? 0 : index, true)
+    if (resultList.currentIndex === 0)
+      resultList.contentY = resultList.originY
     resultList.forceActiveFocus()
   }
 
@@ -669,7 +671,14 @@ Panel {
           }
         }
 
-        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+        ScrollBar.vertical: ScrollBar {
+          objectName: "everything-scrollbar"
+          policy: ScrollBar.AsNeeded
+          leftPadding: Style.space(4)
+          rightPadding: 0
+          palette.mid: Color.accent
+          palette.dark: Color.accent
+        }
 
         delegate: Item {
           id: row

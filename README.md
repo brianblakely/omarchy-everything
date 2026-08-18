@@ -100,7 +100,7 @@ directory.
 | Navigation | `J`, `Down` | Move to the next visible result or collapsed group |
 | Navigation | `H`, `Left` | Collapse the current group |
 | Navigation | `L`, `Right` | Expand the current group |
-| Navigation | `Home`, `End`, `g`, `G` | Move to the first or last result |
+| Navigation | `Home`, `End`, `g`, `G` | Move to the first or last result; first resets the list to the top |
 | Navigation | `Page Up`, `Page Down`, `Ctrl+U`, `Ctrl+D` | Move one visible page |
 | Navigation | `Ctrl+P`, `Ctrl+N` | Move to the previous or next result |
 | Navigation | `Enter`, `Space` | Expand a collapsed group, or close Everything and activate the highlighted thing |
