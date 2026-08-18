@@ -1,0 +1,76 @@
+from __future__ import annotations
+
+import unittest
+
+from everything.model import (
+    SnapshotRegistry,
+    TokenCodec,
+    TokenError,
+    Viewport,
+    dedupe_viewports,
+    identity_component,
+    stable_id,
+)
+
+
+def viewport(identifier: str, activation: dict | None = None) -> Viewport:
+    return Viewport(
+        id=identifier,
+        kind="window",
+        provider="Test",
+        title="Same title",
+        activation=activation or {"native": identifier},
+    )
+
+
+class IdentityTests(unittest.TestCase):
+    def test_identity_components_do_not_collide(self) -> None:
+        self.assertNotEqual(stable_id("test", "a/b", "c"), stable_id("test", "a", "b/c"))
+        self.assertEqual(identity_component("same title"), "same%20title")
+        self.assertIn("%25", identity_component("100%"))
+
+    def test_duplicate_titles_keep_distinct_native_ids(self) -> None:
+        rows = dedupe_viewports([viewport("test:native-1"), viewport("test:native-2")])
+        self.assertEqual([row.id for row in rows], ["test:native-1", "test:native-2"])
+
+    def test_conflicting_duplicate_ids_are_not_silently_dropped(self) -> None:
+        rows = dedupe_viewports(
+            [viewport("test:collision", {"native": 1}), viewport("test:collision", {"native": 2})]
+        )
+        self.assertEqual(len(rows), 2)
+        self.assertNotEqual(rows[0].id, rows[1].id)
+
+    def test_equal_duplicate_rows_merge_badges(self) -> None:
+        first = viewport("test:one", {"native": 1})
+        first.badges = ["One"]
+        second = viewport("test:one", {"native": 1})
+        second.badges = ["Two"]
+        self.assertEqual(dedupe_viewports([first, second])[0].badges, ["One", "Two"])
+
+
+class TokenTests(unittest.TestCase):
+    def test_tokens_are_authenticated_and_process_local(self) -> None:
+        codec = TokenCodec(b"a" * 32)
+        token = codec.encode({"provider": "test", "id": "test:1", "generation": 1})
+        self.assertEqual(codec.decode(token)["id"], "test:1")
+        with self.assertRaises(TokenError):
+            TokenCodec(b"b" * 32).decode(token)
+
+    def test_snapshot_generation_rejects_stale_token(self) -> None:
+        registry = SnapshotRegistry(TokenCodec(b"x" * 32))
+        first = registry.publish("test", [viewport("test:1")])[0]
+        reference = registry.decode_reference("test:1", first["activationToken"])
+        self.assertTrue(registry.token_is_current(reference))
+        registry.publish("test", [viewport("test:1")])
+        self.assertFalse(registry.token_is_current(reference))
+
+    def test_token_cannot_be_retargeted(self) -> None:
+        registry = SnapshotRegistry(TokenCodec(b"y" * 32))
+        row = registry.publish("test", [viewport("test:1")])[0]
+        with self.assertRaises(TokenError):
+            registry.decode_reference("test:2", row["activationToken"])
+
+
+if __name__ == "__main__":
+    unittest.main()
+

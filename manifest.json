@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "b.everything",
+  "name": "Everything",
+  "version": "0.0.1",
+  "author": "Brian Blakely",
+  "description": "Search and switch to every actionable local viewport",
+  "license": "MIT",
+  "kinds": ["service", "bar-widget"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "Everything.qml"
+  },
+  "barWidget": {
+    "displayName": "Everything",
+    "description": "Search windows, tabs, panes, sessions, agents, and buffers",
+    "category": "Compositor",
+    "allowMultiple": false,
+    "defaultSection": "left"
+  }
+}
