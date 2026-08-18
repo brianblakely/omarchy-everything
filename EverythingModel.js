@@ -202,7 +202,7 @@ function sameStringList(left, right) {
   return true
 }
 
-function samePresentation(left, right) {
+function sameRenderedTraits(left, right) {
   if (!left || !right) return false
   return itemUuid(left) === itemUuid(right)
     && String(left.id || "") === String(right.id || "")
@@ -212,9 +212,13 @@ function samePresentation(left, right) {
     && String(left.context || "") === String(right.context || "")
     && String(left.parentId || "") === String(right.parentId || "")
     && (left.active === true) === (right.active === true)
+    && sameStringList(left.badges, right.badges)
+}
+
+function sameSourceTraits(left, right) {
+  return sameRenderedTraits(left, right)
     && Number(left.recency || 0) === Number(right.recency || 0)
     && sameStringList(left.searchTerms, right.searchTerms)
-    && sameStringList(left.badges, right.badges)
 }
 
 function sameRankedItems(currentItems, incomingItems) {
@@ -223,7 +227,7 @@ function sameRankedItems(currentItems, incomingItems) {
   if (current.length !== incoming.length) return false
   for (var i = 0; i < current.length; i++) {
     if (itemUuid(current[i]) !== itemUuid(incoming[i])
-        || !samePresentation(current[i], incoming[i])) return false
+        || !sameRenderedTraits(current[i], incoming[i])) return false
   }
   return true
 }
@@ -245,7 +249,7 @@ function reconcileItems(currentItems, incomingItems) {
     var fresh = incoming[row]
     var uuid = itemUuid(fresh)
     var previous = uuid ? existing[uuid] : null
-    if (!uuid || seen[uuid] || !samePresentation(previous, fresh)) {
+    if (!uuid || seen[uuid] || !sameSourceTraits(previous, fresh)) {
       changed = true
       next.push(fresh)
     } else {

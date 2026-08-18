@@ -43,8 +43,9 @@ ShellRoot {
     return null
   }
 
-  function rows(reverseOrder, tokenGeneration) {
+  function rows(reverseOrder, tokenGeneration, recencyOffset) {
     var out = []
+    var offset = Number(recencyOffset || 0)
     for (var i = 0; i < 40; i++) {
       out.push({
         id: "test:" + String(i).padStart(2, "0"),
@@ -57,7 +58,7 @@ ShellRoot {
         parentId: "",
         badges: [],
         active: false,
-        recency: reverseOrder ? i : 100 - i,
+        recency: (reverseOrder ? i : 100 - i) + offset,
         activationToken: "token-" + String(tokenGeneration || "one") + "-" + i
       })
     }
@@ -107,7 +108,7 @@ ShellRoot {
       selectedBeforeRefresh = resultId(listObject.currentIndex)
       selectedOffsetBeforeRefresh = listObject.currentIndex * widgetObject.rowHeight - listObject.contentY
       rankedBeforeRefresh = widgetObject.rankedItems
-      serviceObject.items = rows(false, "two")
+      serviceObject.items = rows(false, "two", 500)
     } else if (refreshTestStage === 3) {
       if (widgetObject.rankedItems !== rankedBeforeRefresh) {
         failRefreshTest("unchanged list was replaced")

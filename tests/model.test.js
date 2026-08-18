@@ -103,6 +103,16 @@ const item = (id, title, context, extra = {}) => ({
   ]
   assert.equal(sandbox.sameRankedItems(current, sameRank), true,
     "an identical ranked sequence does not update the UI")
+  const metadataOnlyRank = [
+    item("one", "One", "", { recency: 123, searchTerms: ["latest"], activationToken: "newest-one" }),
+    item("two", "Two", "", { recency: 456, searchTerms: ["fresh"], activationToken: "newest-two" }),
+  ]
+  assert.equal(sandbox.sameRankedItems(current, metadataOnlyRank), true,
+    "ranking metadata does not replace an unchanged rendered sequence")
+  const metadataRefresh = sandbox.reconcileItems(current, metadataOnlyRank)
+  assert.equal(metadataRefresh.changed, true,
+    "the source model retains fresh ranking metadata")
+  assert.equal(metadataRefresh.items[0].recency, 123)
   assert.equal(sandbox.sameRankedItems(current, sameRank.slice().reverse()), false,
     "a reordered ranked sequence updates the UI")
   assert.equal(sandbox.sameRankedItems(current, changed.items), false,
