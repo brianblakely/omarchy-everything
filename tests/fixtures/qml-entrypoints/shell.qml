@@ -55,10 +55,12 @@ ShellRoot {
         kind: kinds[Math.floor(i / 10)],
         provider: "Test",
         title: "Shared thing",
+        iconHints: i < 10 ? ["foot"] : [],
         context: "Refresh fixture",
         searchTerms: [],
         parentId: "",
-        badges: i === 0 ? root.qmlWindowBadges : [],
+        badges: i === 0 ? root.qmlWindowBadges
+          : (i < 10 ? ["Window", "Workspace 1"] : []),
         active: false,
         recency: (reverseOrder ? i : 100 - i) + offset,
         activationToken: "token-" + String(tokenGeneration || "one") + "-" + i
@@ -104,6 +106,11 @@ ShellRoot {
       }
       if (!findNamed(widgetObject, "everything-section-window")) {
         failRefreshTest("kind section was not rendered")
+        return
+      }
+      var windowIcon = findNamed(widgetObject, "everything-window-icon-0")
+      if (!windowIcon || String(windowIcon.source || "").length === 0) {
+        failRefreshTest("Hyprland window icon was not resolved")
         return
       }
       var windowMetadata = findNamed(widgetObject, "everything-metadata-0")

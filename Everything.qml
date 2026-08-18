@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls
+import Quickshell
 import qs.Commons
 import qs.Ui
 import "EverythingModel.js" as Model
@@ -15,6 +16,11 @@ Panel {
   readonly property var everythingService: root.bar && root.bar.shell
     && typeof root.bar.shell.serviceFor === "function"
     ? root.bar.shell.serviceFor("b.everything") : null
+  readonly property var appLibrary: root.bar && root.bar.shell
+    && root.bar.shell.appLibrary !== undefined ? root.bar.shell.appLibrary : null
+  readonly property var desktopEntries: DesktopEntries.applications.values || []
+  readonly property var itemRelations: Model.relationIndex(
+    everythingService ? everythingService.items : [])
   readonly property color foreground: root.bar ? root.bar.foreground : Color.foreground
   readonly property color dimForeground: Qt.darker(foreground, 1.55)
   readonly property real rowHeight: Style.font.body * 1.5
@@ -229,37 +235,44 @@ Panel {
     resultUpdateInProgress = false
   }
 
-  function itemForId(id) {
-    if (!id || !everythingService) return null
-    var source = everythingService.items || []
-    for (var i = 0; i < source.length; i++)
-      if (String(source[i].id) === String(id)) return source[i]
-    return null
-  }
-
   function breadcrumb(item) {
-    var values = []
-    var seen = {}
-    var cursor = item
-    for (var depth = 0; cursor && cursor.parentId && depth < 12; depth++) {
-      var parentId = String(cursor.parentId)
-      if (seen[parentId]) break
-      seen[parentId] = true
-      var parent = itemForId(parentId)
-      if (!parent) break
-      values.unshift(String(parent.title || ""))
-      cursor = parent
-    }
-    var context = item && item.context ? String(item.context) : ""
-    if (context && (values.length === 0 || values[values.length - 1] !== context))
-      values.push(context)
-    return values.join("  ›  ")
+    return Model.breadcrumbFromIndex(item, itemRelations)
   }
 
-  function parentTitle(item) {
-    if (!item || !item.parentId) return ""
-    var parent = itemForId(String(item.parentId))
-    return parent ? String(parent.title || "") : ""
+  function usableIconSource(value) {
+    var source = String(value || "")
+    var generic = String(Quickshell.iconPath("application-x-executable", true) || "")
+    return source && source !== generic ? source : ""
+  }
+
+  function windowIconSource(item) {
+    if (!item || String(item.kind || "") !== "window") return ""
+    var hints = Model.iconHintList(item)
+    if (hints.length === 0) return ""
+
+    var entry = Model.matchDesktopEntry(hints, desktopEntries)
+    if (!entry) {
+      for (var lookup = 0; lookup < hints.length && !entry; lookup++) {
+        try { entry = DesktopEntries.heuristicLookup(hints[lookup]) } catch (_error) { }
+      }
+    }
+    if (entry && entry.icon) {
+      if (appLibrary && typeof appLibrary.iconSource === "function") {
+        var librarySource = usableIconSource(appLibrary.iconSource(entry.icon))
+        if (librarySource) return librarySource
+      }
+      var entrySource = usableIconSource(Quickshell.iconPath(String(entry.icon), true))
+      if (entrySource) return entrySource
+    }
+
+    // A direct icon name from Hyprland can be useful even when it has no
+    // corresponding desktop entry. Unknown names remain a local glyph
+    // fallback; they are never treated as arbitrary URLs.
+    for (var hint = 0; hint < hints.length; hint++) {
+      var directSource = usableIconSource(Quickshell.iconPath(hints[hint], true))
+      if (directSource) return directSource
+    }
+    return ""
   }
 
   function handleSupplementalListKey(event) {
@@ -287,6 +300,8 @@ Panel {
   onOpenedChanged: {
     if (root.opened) {
       searchField.text = ""
+      if (appLibrary && typeof appLibrary.refreshIcons === "function")
+        appLibrary.refreshIcons()
       rebuildRankedItems()
       resetResultsForOpen()
       if (everythingService) everythingService.acquire(instanceKey)
@@ -486,8 +501,9 @@ Panel {
               || resultList.activeFocus || keyCatcher.activeFocus)
             && resultList.currentIndex === index
           readonly property string crumb: root.breadcrumb(modelData)
-          readonly property string metadata: Model.vitalMetadata(
-            modelData, crumb, root.parentTitle(modelData))
+          readonly property string metadata: Model.metadataForItem(
+            modelData, root.itemRelations)
+          readonly property string windowIconSource: root.windowIconSource(modelData)
 
           Accessible.role: Accessible.ListItem
           Accessible.name: String(modelData.title || "Untitled")
@@ -511,21 +527,41 @@ Panel {
               : "transparent"
           }
 
-          Text {
+          Item {
             id: thingIcon
             anchors.left: parent.left
             anchors.leftMargin: Style.space(8)
-            anchors.verticalCenter: parent.verticalCenter
             width: Style.space(24)
-            text: Model.kindIcon(row.modelData.kind)
-            color: row.highlighted || row.modelData.active === true
-              ? root.foreground : root.dimForeground
-            font.family: Style.font.family
-            font.pixelSize: Style.font.icon
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
+            height: parent.height
             Accessible.role: Accessible.Graphic
             Accessible.name: Model.kindLabel(row.modelData.kind) + " icon"
+
+            Image {
+              id: applicationIcon
+              objectName: "everything-window-icon-" + row.index
+              anchors.centerIn: parent
+              width: Math.min(parent.width, Style.font.icon)
+              height: width
+              visible: row.windowIconSource.length > 0 && status !== Image.Error
+              source: row.windowIconSource
+              fillMode: Image.PreserveAspectFit
+              asynchronous: true
+              smooth: true
+              sourceSize.width: width
+              sourceSize.height: height
+            }
+
+            Text {
+              id: fallbackThingIcon
+              anchors.fill: parent
+              visible: !applicationIcon.visible
+              text: Model.kindIcon(row.modelData.kind)
+              color: row.highlighted ? root.foreground : root.dimForeground
+              font.family: Style.font.family
+              font.pixelSize: Style.font.icon
+              horizontalAlignment: Text.AlignHCenter
+              verticalAlignment: Text.AlignVCenter
+            }
           }
 
           Text {

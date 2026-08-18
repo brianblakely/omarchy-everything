@@ -13,9 +13,11 @@ The suite performs:
 - Python compilation and 30+ unit/protocol tests;
 - fuzzy token ranking over titles and displayed group names only, explicit
   exclusion of context/provider/badges/search terms, stable kind grouping,
-  active/recency order, duplicate identity handling, token authentication, and
-  hidden-result persistence;
-- deterministic kind icons, one-line row density, vital-metadata selection,
+  natural displayed-metadata order with relevance/current/recency tie-breakers,
+  parent-derived metadata, duplicate identity handling, token authentication,
+  and hidden-result persistence;
+- Hyprland window-to-desktop-entry icon matching, deterministic fallback and
+  Herdr agent glyphs, one-line row density, vital-metadata selection,
   JavaScript/Qt-list badge normalization, exclusion of redundant kind labels,
   Herdr immediate-parent metadata, and absence of visual metadata pills;
 - absence of panel scan, count, warning, and empty-result messages while
@@ -140,12 +142,16 @@ single refresh followed by a visible stale notification.
   heading, groups remain in stable order, and ranking is preserved within each
   group. Confirm Herdr agents precede every other Herdr group and Herdr sessions
   follow all of them. Refresh while the selected row crosses a heading and
-  confirm its visual offset is retained.
-- Confirm every row is one line with a kind icon on the left and exactly one
+  confirm its visual offset is retained. Within a group, confirm the displayed
+  metadata controls natural ordering, including `Workspace 2` before
+  `Workspace 10` and Herdr child rows ordered by their displayed parent name.
+- Confirm every row is one line with an icon on the left and exactly one
   status or context value on the right. Exercise long titles and paths, active
   states, modified buffers, detached sessions, and special workspaces; confirm
-  text elides without overlap, kind labels never repeat in the right-side
-  value, and no pill-shaped metadata is rendered.
+  each window uses its own resolved application icon, Herdr agents use the
+  shell's agent robot, unresolved windows use the window fallback, text elides
+  without overlap, kind labels never repeat in the right-side value, and no
+  pill-shaped metadata is rendered.
 - Scroll to and highlight a middle result, close the panel, and open it again.
   Confirm the first result is highlighted and the list is at its scroll origin.
 - Open the panel while the pointer is stationary over a result. Confirm that

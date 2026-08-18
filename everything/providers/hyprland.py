@@ -103,6 +103,16 @@ class HyprlandProvider:
             birth = process_birth(pid)
             app_class = str(client.get("class") or client.get("initialClass") or "Application")
             title = str(client.get("title") or client.get("initialTitle") or app_class)
+            icon_hints = [
+                value
+                for value in (
+                    client.get("icon"),
+                    client.get("class"),
+                    client.get("initialClass"),
+                    client.get("initialTitle"),
+                )
+                if isinstance(value, str) and value.strip()
+            ]
             workspace = client.get("workspace") if isinstance(client.get("workspace"), dict) else {}
             workspace_name = str(workspace.get("name") or workspace.get("id") or "unknown")
             badges = ["Window", "Workspace " + workspace_name]
@@ -120,6 +130,7 @@ class HyprlandProvider:
                     kind="window",
                     provider="Hyprland",
                     title=title,
+                    icon_hints=icon_hints,
                     context=f"{app_class} · workspace {workspace_name}",
                     search_terms=[
                         app_class,

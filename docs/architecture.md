@@ -56,20 +56,26 @@ open and releases it when closed.
 metadata may change without replacing the visible list. A UI update is needed
 only when the ordered UUID sequence or a rendered trait changes; genuine list
 changes preserve the highlighted UUID and its visual offset when possible.
-It orders exact kind groups deterministically and ranks rows within each group.
+It orders exact kind groups deterministically, then sorts rows naturally by
+their displayed metadata within each group. Search relevance, current state,
+and recency are tie-breakers only. Parent-derived Herdr metadata is resolved
+from the complete source set before query and hidden-ID filtering.
 Query tokens match only the title and the exact displayed group label; context,
 provider, badges, and provider search terms never enter matching.
 QML owns the accessible section headings and restores visual offset from the
 live selected delegate geometry, falling back to deterministic section geometry
 when that delegate has not been instantiated. The pure model also derives each
-row's kind icon and selects one vital metadata value; QML renders only that
-icon, title, and value on a single line. Kind labels are excluded from metadata;
+row's fallback kind glyph, matches Hyprland window icon hints to the shell's
+current desktop entries, and selects one vital metadata value. QML renders only
+that icon, title, and value on a single line. Herdr agent rows reuse the shell's
+agent-usage robot glyph. Kind labels are excluded from metadata;
 provider-specific kind-bearing fallbacks are reduced to their useful identity
 or location before display. Badge normalization accepts both JavaScript arrays
 and Qt typed lists, including their comma-joined bridge representation, before
-the kind filter runs. QML resolves the immediate public parent title; the model
-uses it for Herdr workspace, tab, and pane metadata, while agent and session
-metadata retain their status semantics.
+the kind filter runs. The model indexes the complete public parent graph once
+per source update; both ranking and QML use that same index for breadcrumbs and
+Herdr workspace, tab, and pane metadata, while agent and session metadata retain
+their status semantics.
 
 ## Helper and provider ownership
 

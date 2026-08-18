@@ -57,9 +57,17 @@ class IdentityTests(unittest.TestCase):
         self.assertEqual(uuid.UUID(value).version, 5)
 
     def test_public_item_contains_its_ui_uuid(self) -> None:
-        row = thing("test:native-1")
+        row = Thing(
+            id="test:native-1",
+            kind="window",
+            provider="Test",
+            title="Window",
+            icon_hints=["org.example.App", "org.example.App", "example-app"],
+            activation={"native": 1},
+        )
         public = row.public("opaque")
         self.assertEqual(public["uiUuid"], thing_ui_uuid(row.provider, row.kind, row.id))
+        self.assertEqual(public["iconHints"], ["org.example.App", "example-app"])
 
 
 class TokenTests(unittest.TestCase):

@@ -112,7 +112,66 @@ const item = (id, title, context, extra = {}) => ({
 }
 
 {
+  const rows = [
+    item("workspace-10", "Alpha", "", {
+      badges: ["Window", "Workspace 10"], active: true, recency: 4000,
+    }),
+    item("workspace-2", "Alpha notes", "", {
+      badges: ["Window", "Workspace 2"], recency: 10,
+    }),
+    item("workspace-1", "Notes about alpha", "", {
+      badges: ["Window", "Workspace 1"], recency: -4000,
+    }),
+  ]
+  assert.deepEqual(
+    Array.from(sandbox.rank(rows, "alpha", {}), row => row.id),
+    ["workspace-1", "workspace-2", "workspace-10"],
+    "displayed metadata is the primary natural sort key within a group",
+  )
+}
+
+{
+  const rows = [
+    item("parent-zulu", "Zulu", "", { kind: "herdr-tab" }),
+    item("child-zulu", "Child Zulu", "Fallback", {
+      kind: "herdr-pane", parentId: "parent-zulu", badges: ["Herdr pane"],
+    }),
+    item("parent-alpha", "Alpha", "", { kind: "herdr-tab" }),
+    item("child-alpha", "Child Alpha", "Fallback", {
+      kind: "herdr-pane", parentId: "parent-alpha", badges: ["Herdr pane"],
+    }),
+  ]
+  assert.deepEqual(
+    Array.from(sandbox.rank(rows, "child", {
+      "parent-alpha": true,
+      "parent-zulu": true,
+    }), row => row.id),
+    ["child-alpha", "child-zulu"],
+    "parent-derived Herdr metadata controls ordering even when parents are filtered",
+  )
+}
+
+{
+  assert.equal(sandbox.kindIcon("herdr-agent"), "󱚣",
+    "Herdr agents use Omarchy's agent-usage robot glyph")
   assert.notEqual(sandbox.kindIcon("window"), sandbox.kindIcon("neovim-buffer"))
+  const entries = [
+    {
+      id: "foot.desktop", name: "Foot", startupClass: "foot",
+      execString: "foot", icon: "foot",
+    },
+    {
+      id: "Slack Loadup.desktop", name: "Slack Loadup", startupClass: "",
+      execString: "omarchy-launch-webapp https://app.slack.com/client/T0BD9A3HVQF",
+      icon: "slack-loadup",
+    },
+  ]
+  assert.equal(sandbox.matchDesktopEntry(["foot"], entries), entries[0],
+    "Hyprland application classes resolve native desktop entries")
+  assert.equal(sandbox.matchDesktopEntry([
+    "chrome-app.slack.com__client_T0BD9A3HVQF-Default",
+    "app.slack.com_/client/T0BD9A3HVQF",
+  ], entries), entries[1], "Hyprland web-app identity resolves its own icon")
   assert.equal(sandbox.vitalMetadata(
     item("window", "Window", "App · workspace 4", { badges: ["Window", "Workspace 4"] }), ""),
     "Workspace 4")
@@ -224,6 +283,12 @@ const item = (id, title, context, extra = {}) => ({
     "a reordered ranked sequence updates the UI")
   assert.equal(sandbox.sameRankedItems(current, changed.items), false,
     "changed rendered traits update the UI")
+  const iconChanged = [
+    item("one", "One", "", { iconHints: ["new-icon"] }),
+    current[1],
+  ]
+  assert.equal(sandbox.sameRankedItems(current, iconChanged), false,
+    "a changed window icon hint updates the rendered row")
 }
 
 const qml = fs.readFileSync(path.join(root, "Everything.qml"), "utf8")
@@ -287,14 +352,22 @@ assert.match(qml, /readonly property real rowHeight:\s*Style\.font\.body \* 1\.5
   "result row height scales to one and a half times the thing-name font")
 assert.match(qml, /section\.property:\s*"kind"[\s\S]*section\.delegate:[\s\S]*Accessible\.Heading/,
   "the list renders accessible kind headings")
-assert.match(qml, /id:\s*thingIcon[\s\S]*Model\.kindIcon\(row\.modelData\.kind\)/,
-  "every row displays its deterministic kind icon")
+assert.match(qml, /id:\s*applicationIcon[\s\S]*source:\s*row\.windowIconSource/,
+  "window rows display the icon resolved from Hyprland identity")
+assert.match(qml, /id:\s*fallbackThingIcon[\s\S]*Model\.kindIcon\(row\.modelData\.kind\)/,
+  "rows retain a deterministic glyph fallback")
+const fallbackIconHandler = qml.slice(qml.indexOf("id: fallbackThingIcon"),
+  qml.indexOf("id: metadataLabel", qml.indexOf("id: fallbackThingIcon")))
+assert.match(fallbackIconHandler, /color:\s*row\.highlighted\s*\?\s*root\.foreground\s*:\s*root\.dimForeground/,
+  "only the actual highlight brightens a glyph icon")
+assert.doesNotMatch(fallbackIconHandler, /modelData\.active/,
+  "the provider's current marker does not imitate keyboard highlight")
 assert.match(qml, /id:\s*metadataLabel[\s\S]*text:\s*row\.metadata/,
   "every row renders one selected metadata value")
-assert.match(qml, /function parentTitle[\s\S]*itemForId[\s\S]*parent\.title/,
-  "the panel resolves immediate parent names from public items")
-assert.match(qml, /vitalMetadata\([\s\S]*modelData, crumb, root\.parentTitle\(modelData\)\)/,
-  "row metadata receives the immediate parent name")
+assert.match(qml, /readonly property var itemRelations:\s*Model\.relationIndex/,
+  "the panel indexes public parent relationships once per source update")
+assert.match(qml, /metadataForItem\([\s\S]*modelData, root\.itemRelations\)/,
+  "rendering and sorting derive metadata through the same pure helper")
 assert.doesNotMatch(qml, /id:\s*badgeRow|id:\s*badgeLabel|radius:\s*height \/ 2/,
   "result rows do not render metadata pills")
 const titleHandler = qml.slice(qml.indexOf("id: titleLabel"), qml.indexOf("MouseArea", qml.indexOf("id: titleLabel")))

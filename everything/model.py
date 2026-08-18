@@ -67,6 +67,7 @@ class Thing:
     kind: str
     provider: str
     title: str
+    icon_hints: list[str] = field(default_factory=list)
     context: str = ""
     search_terms: list[str] = field(default_factory=list)
     parent_id: str = ""
@@ -83,6 +84,7 @@ class Thing:
         if not self.provider:
             raise ValueError("provider is required for every thing")
         self.title = str(self.title or "Untitled").strip() or "Untitled"
+        self.icon_hints = _unique_strings(self.icon_hints)
         self.context = str(self.context or "").strip()
         self.search_terms = _unique_strings(self.search_terms)
         self.badges = _unique_strings(self.badges)
@@ -96,6 +98,7 @@ class Thing:
             "kind": self.kind,
             "provider": self.provider,
             "title": self.title,
+            "iconHints": self.icon_hints,
             "context": self.context,
             "searchTerms": self.search_terms,
             "parentId": self.parent_id,
@@ -140,6 +143,7 @@ def dedupe_things(items: Iterable[Thing]) -> list[Thing]:
         if existing.activation == item.activation and existing.kind == item.kind:
             out[position] = replace(
                 existing,
+                icon_hints=_unique_strings(existing.icon_hints + item.icon_hints),
                 search_terms=_unique_strings(existing.search_terms + item.search_terms),
                 badges=_unique_strings(existing.badges + item.badges),
                 active=existing.active or item.active,

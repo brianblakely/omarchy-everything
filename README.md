@@ -69,13 +69,17 @@ to the search field. Every space-separated
 query token must fuzzily match either the thing title or its displayed group
 name. No context, provider, badge, or hidden search term participates. Results
 are grouped by exact kind in a stable order, with Herdr agents before the other
-Herdr groups and Herdr sessions after all of them. Within each group, title
-matches rank first, followed by group-name match quality, the current thing,
-and recency. Opening beneath a stationary pointer does not move the keyboard
-highlight; pointer selection begins only after actual movement.
-Each result is one line: a deterministic kind icon, its title, and one vital
-status or context value. Status annotations remain available to assistive
-technology but are not searchable or rendered as pills. The right-side value
+Herdr groups and Herdr sessions after all of them. Within each group, the
+displayed metadata is sorted naturally, so `Workspace 2` precedes
+`Workspace 10`; title and group-name match quality, the current thing, and
+recency break metadata ties. Opening beneath a stationary pointer does not move
+the keyboard highlight; pointer selection begins only after actual movement.
+Each result is one line: its icon, title, and one vital status or context
+value. Windows resolve their application icon from the identity Hyprland
+reports, with a generic window fallback; Herdr agents reuse Omarchy's agent
+robot, and other things use deterministic kind glyphs. Status annotations
+remain available to assistive technology but are not searchable or rendered
+as pills. The right-side value
 never repeats the kind already communicated by the section and icon. Herdr
 workspaces, tabs, and panes show their immediate parent's name there; Herdr
 agents and sessions retain their own status metadata.

@@ -43,7 +43,10 @@ class HyprlandTests(unittest.IsolatedAsyncioTestCase):
                 "address": "0xabc",
                 "mapped": True,
                 "hidden": True,
+                "icon": "foot-symbolic",
                 "class": "foot",
+                "initialClass": "foot",
+                "initialTitle": "foot_/",
                 "title": "shell",
                 "pid": 999999,
                 "workspace": {"id": -99, "name": "special:scratch"},
@@ -58,6 +61,7 @@ class HyprlandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.items[0].kind, "window")
         self.assertIn("Hidden", result.items[0].badges)
         self.assertIn("Scratchpad", result.items[0].badges)
+        self.assertEqual(result.items[0].icon_hints, ["foot-symbolic", "foot", "foot_/"])
         self.assertNotIn("process", result.items[0].kind)
 
 

@@ -81,6 +81,7 @@ Every public item contains:
 | `kind` | One supported actionable thing kind |
 | `provider` | Human-readable provider badge |
 | `title` | Primary display title and the only searchable item field |
+| `iconHints` | Ordered, presentation-only icon/application identities; populated for managed windows from Hyprland client data |
 | `context` | Cwd, application, workspace, or container context; never searched |
 | `searchTerms` | Provider-supplied aliases retained in the contract but not used by panel matching |
 | `parentId` | Parent thing used to build breadcrumbs and Herdr child-row metadata |

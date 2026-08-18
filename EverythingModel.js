@@ -72,6 +72,172 @@ function badgeList(value) {
   return badges
 }
 
+function iconHintList(value) {
+  var raw = value && value.iconHints !== undefined ? value.iconHints : value
+  var hints = stringList(raw)
+  var output = []
+  for (var index = 0; index < hints.length; index++) {
+    var hint = String(hints[index] || "").trim()
+    if (hint && output.indexOf(hint) < 0) output.push(hint)
+  }
+  return output
+}
+
+function objectString(object, property) {
+  try {
+    return object ? String(object[property] || "").trim() : ""
+  } catch (_error) {
+    return ""
+  }
+}
+
+function desktopId(value) {
+  var identity = normalized(value)
+  return identity.slice(-8) === ".desktop" ? identity.slice(0, -8) : identity
+}
+
+function compactIdentity(value) {
+  return normalized(value).replace(/[^a-z0-9]+/g, "")
+}
+
+function executableName(value) {
+  var raw = String(value || "").trim()
+  if (!raw) return ""
+  var match = raw.match(/^(?:"([^"]+)"|'([^']+)'|([^\s]+))/)
+  var executable = match ? (match[1] || match[2] || match[3] || "") : ""
+  var slash = executable.lastIndexOf("/")
+  if (slash >= 0) executable = executable.slice(slash + 1)
+  return desktopId(executable)
+}
+
+function iconIdentity(value) {
+  var identity = normalized(value).split("?")[0]
+  var slash = Math.max(identity.lastIndexOf("/"), identity.lastIndexOf("\\"))
+  if (slash >= 0) identity = identity.slice(slash + 1)
+  return identity.replace(/\.(?:png|svg|xpm)$/i, "")
+}
+
+function normalizeWebHost(value) {
+  var host = normalized(value).replace(/^www\./, "")
+  return /^[a-z0-9.-]+$/.test(host) && host.indexOf(".") > 0 ? host : ""
+}
+
+function normalizeWebPath(value) {
+  var path = String(value || "").trim().split(/[?#]/)[0]
+  if (!path || path === "/") return ""
+  if (path.charAt(0) !== "/") path = "/" + path
+  return path.replace(/\/+$/, "")
+}
+
+function webIdentityFromHint(value) {
+  var raw = String(value || "").trim()
+  var initialMarker = raw.indexOf("_/")
+  if (initialMarker > 0) {
+    var initialHost = normalizeWebHost(raw.slice(0, initialMarker))
+    if (initialHost) {
+      return {
+        host: initialHost,
+        path: normalizeWebPath(raw.slice(initialMarker + 1))
+      }
+    }
+  }
+
+  var match = raw.match(
+    /^(?:chrome|chromium|google-chrome|brave(?:-browser)?|microsoft-edge|opera|vivaldi(?:-stable)?|helium)-(.+?)-Default$/i)
+  if (!match) return null
+  var identity = match[1]
+  var classMarker = identity.indexOf("__")
+  var classHost = normalizeWebHost(classMarker >= 0 ? identity.slice(0, classMarker) : identity)
+  if (!classHost) return null
+  return {
+    host: classHost,
+    path: classMarker >= 0
+      ? normalizeWebPath(identity.slice(classMarker + 2).replace(/_/g, "/"))
+      : ""
+  }
+}
+
+function webIdentityFromEntry(entry) {
+  var match = objectString(entry, "execString").match(
+    /https?:\/\/([a-z0-9.-]+)(\/[^\s"'%]*)?/i)
+  if (!match) return null
+  var host = normalizeWebHost(match[1])
+  return host ? { host: host, path: normalizeWebPath(match[2] || "") } : null
+}
+
+function entryIdentities(entry) {
+  return [
+    desktopId(objectString(entry, "id")),
+    normalized(objectString(entry, "startupClass")),
+    normalized(objectString(entry, "name")),
+    executableName(objectString(entry, "execString")),
+    iconIdentity(objectString(entry, "icon"))
+  ]
+}
+
+function matchDesktopEntry(iconHints, entries) {
+  var hints = iconHintList(iconHints)
+  var values = entries && typeof entries.length === "number" ? entries : []
+  var hintIndex
+  var entryIndex
+
+  // Hyprland's class and initialClass normally match either the desktop id or
+  // StartupWMClass exactly. Prefer those unambiguous identities.
+  for (hintIndex = 0; hintIndex < hints.length; hintIndex++) {
+    var hintId = desktopId(hints[hintIndex])
+    var hintClass = normalized(hints[hintIndex])
+    for (entryIndex = 0; entryIndex < values.length; entryIndex++) {
+      var exact = values[entryIndex]
+      if (!exact) continue
+      if (desktopId(objectString(exact, "id")) === hintId
+          || normalized(objectString(exact, "startupClass")) === hintClass)
+        return exact
+    }
+  }
+
+  // Omarchy web-app classes and initial titles carry the host/path that also
+  // appears in the desktop entry command. This keeps distinct PWAs on their
+  // own icons instead of collapsing all of them to the browser icon.
+  var webIdentity = null
+  for (hintIndex = 0; hintIndex < hints.length && !webIdentity; hintIndex++)
+    webIdentity = webIdentityFromHint(hints[hintIndex])
+  if (webIdentity) {
+    var best = null
+    var bestScore = -1
+    for (entryIndex = 0; entryIndex < values.length; entryIndex++) {
+      var candidate = values[entryIndex]
+      var entryWeb = webIdentityFromEntry(candidate)
+      if (!entryWeb || entryWeb.host !== webIdentity.host) continue
+      var score = 100
+      if (webIdentity.path && entryWeb.path) {
+        if (webIdentity.path === entryWeb.path) score += 30
+        else if (webIdentity.path.indexOf(entryWeb.path) === 0
+            || entryWeb.path.indexOf(webIdentity.path) === 0) score += 20
+      }
+      if (score > bestScore) {
+        best = candidate
+        bestScore = score
+      }
+    }
+    if (best) return best
+  }
+
+  // A few current applications omit StartupWMClass but keep the same compact
+  // identity in their id, executable, name, or icon.
+  for (hintIndex = 0; hintIndex < hints.length; hintIndex++) {
+    var compactHint = compactIdentity(hints[hintIndex])
+    if (!compactHint) continue
+    for (entryIndex = 0; entryIndex < values.length; entryIndex++) {
+      var identities = entryIdentities(values[entryIndex])
+      for (var identity = 0; identity < identities.length; identity++) {
+        if (compactIdentity(identities[identity]) === compactHint)
+          return values[entryIndex]
+      }
+    }
+  }
+  return null
+}
+
 function kindLabel(kind) {
   var labels = {
     "window": "Window",
@@ -106,7 +272,7 @@ function kindIcon(kind) {
     "herdr-workspace": "\uf009",
     "herdr-tab": "\uf24d",
     "herdr-pane": "\uf0db",
-    "herdr-agent": "\uf544",
+    "herdr-agent": "󱚣",
     "neovim-buffer": "\uf1c9"
   }
   return icons[String(kind)] || "\uf128"
@@ -208,6 +374,76 @@ function vitalMetadata(item, breadcrumb, parentTitle) {
   return contextMetadata(item, breadcrumb)
 }
 
+function relationIndex(items) {
+  var source = Array.isArray(items) ? items : []
+  var byId = {}
+  for (var index = 0; index < source.length; index++) {
+    var item = source[index]
+    if (item && item.id) byId[String(item.id)] = item
+  }
+  return byId
+}
+
+function breadcrumbFromIndex(item, byId) {
+  var values = []
+  var seen = {}
+  var cursor = item
+  var relations = byId || {}
+  for (var depth = 0; cursor && cursor.parentId && depth < 12; depth++) {
+    var parentId = String(cursor.parentId)
+    if (seen[parentId]) break
+    seen[parentId] = true
+    var parent = relations[parentId]
+    if (!parent) break
+    values.unshift(String(parent.title || ""))
+    cursor = parent
+  }
+  var context = item && item.context ? String(item.context) : ""
+  if (context && (values.length === 0 || values[values.length - 1] !== context))
+    values.push(context)
+  return values.join("  ›  ")
+}
+
+function parentTitleFromIndex(item, byId) {
+  if (!item || !item.parentId) return ""
+  var parent = (byId || {})[String(item.parentId)]
+  return parent ? String(parent.title || "") : ""
+}
+
+function metadataForItem(item, byId) {
+  return vitalMetadata(item, breadcrumbFromIndex(item, byId),
+    parentTitleFromIndex(item, byId))
+}
+
+function naturalCompare(left, right) {
+  var a = normalized(left)
+  var b = normalized(right)
+  if (a === b) return 0
+  if (!a) return 1
+  if (!b) return -1
+
+  var aParts = a.match(/\d+|\D+/g) || []
+  var bParts = b.match(/\d+|\D+/g) || []
+  var count = Math.min(aParts.length, bParts.length)
+  for (var index = 0; index < count; index++) {
+    var aPart = aParts[index]
+    var bPart = bParts[index]
+    var aNumber = /^\d+$/.test(aPart)
+    var bNumber = /^\d+$/.test(bPart)
+    if (aNumber && bNumber) {
+      var aDigits = aPart.replace(/^0+(?=\d)/, "")
+      var bDigits = bPart.replace(/^0+(?=\d)/, "")
+      if (aDigits.length !== bDigits.length) return aDigits.length - bDigits.length
+      if (aDigits !== bDigits) return aDigits < bDigits ? -1 : 1
+      if (aPart.length !== bPart.length) return aPart.length - bPart.length
+    } else if (aPart !== bPart) {
+      return aPart < bPart ? -1 : 1
+    }
+  }
+  if (aParts.length !== bParts.length) return aParts.length - bParts.length
+  return a < b ? -1 : 1
+}
+
 function kindSectionLabel(kind) {
   var labels = {
     "window": "Windows",
@@ -249,7 +485,7 @@ function kindOrder(kind) {
   return value === undefined ? 1000 : value
 }
 
-function rankedEntry(item, tokens, sourceIndex) {
+function rankedEntry(item, tokens, sourceIndex, relations) {
   var title = normalized(item.title)
   var group = normalized(kindSectionLabel(item.kind))
   var titleHits = 0
@@ -277,6 +513,7 @@ function rankedEntry(item, tokens, sourceIndex) {
   // overflow a numeric bucket and invert the documented lexicographic order.
   return {
     item: item,
+    metadata: metadataForItem(item, relations),
     titleHits: titleHits,
     groupHits: groupHits,
     quality: quality,
@@ -290,16 +527,19 @@ function rank(items, query, hiddenIds) {
   var source = Array.isArray(items) ? items : []
   var hidden = hiddenIds || {}
   var tokens = queryTokens(query)
+  var relations = relationIndex(source)
   var ranked = []
   for (var i = 0; i < source.length; i++) {
     var item = source[i]
     if (!item || !item.id || hidden[String(item.id)] === true) continue
-    var entry = rankedEntry(item, tokens, i)
+    var entry = rankedEntry(item, tokens, i, relations)
     if (entry) ranked.push(entry)
   }
   ranked.sort(function(a, b) {
     var groupOrder = kindOrder(a.item.kind) - kindOrder(b.item.kind)
     if (groupOrder !== 0) return groupOrder
+    var metadataOrder = naturalCompare(a.metadata, b.metadata)
+    if (metadataOrder !== 0) return metadataOrder
     var fields = ["titleHits", "groupHits", "quality", "active", "recency"]
     for (var field = 0; field < fields.length; field++) {
       var name = fields[field]
@@ -391,6 +631,7 @@ function sameRenderedTraits(left, right) {
     && String(left.kind || "") === String(right.kind || "")
     && String(left.provider || "") === String(right.provider || "")
     && String(left.title || "") === String(right.title || "")
+    && sameStringList(left.iconHints, right.iconHints)
     && String(left.context || "") === String(right.context || "")
     && String(left.parentId || "") === String(right.parentId || "")
     && (left.active === true) === (right.active === true)
