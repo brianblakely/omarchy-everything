@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..commands import CommandError
-from ..model import Viewport, process_birth, stable_id
+from ..model import Thing, process_birth, stable_id
 from ..processes import canonical_path
 from .atspi import (
     Atspi,
@@ -204,7 +204,7 @@ class GhosttyProvider:
             return self.cached
 
         previous_address = await self._active_address(context)
-        items: list[Viewport] = []
+        items: list[Thing] = []
         warnings: list[str] = []
         surfaces: list[dict[str, Any]] = []
         tab_objects: dict[str, NativeTab] = {}
@@ -223,7 +223,7 @@ class GhosttyProvider:
                 tabs_by_pid.setdefault(pid, []).append((tab, item_id))
                 parent = self._window_parent_id(context, address)
                 items.append(
-                    Viewport(
+                    Thing(
                         id=item_id,
                         kind="terminal-tab",
                         provider="Ghostty",
@@ -284,7 +284,7 @@ class GhosttyProvider:
                     "fingerprint": fingerprint.json(),
                 }
                 items.append(
-                    Viewport(
+                    Thing(
                         id=item_id,
                         kind="terminal-pane",
                         provider="Ghostty",

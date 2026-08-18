@@ -15,6 +15,7 @@ Item {
 
   property var items: []
   property var providerItems: ({})
+  property var activationTokens: ({})
   property var warnings: []
   property var hiddenIds: ({})
   property var leases: ({})
@@ -22,6 +23,7 @@ Item {
   property int pendingActivations: 0
   property int requestSerial: 0
   property string activeScanId: ""
+  property bool activeScanQuiet: false
   property bool helperReady: false
   property bool scanning: false
   property bool intentionalStop: false
@@ -47,7 +49,7 @@ Item {
     leases = next
     leaseCount = Object.keys(next).length
     ensureHelper()
-    requestScan(true)
+    requestScan(true, false)
   }
 
   function release(ownerKey) {
@@ -64,12 +66,13 @@ Item {
     hiddenIds = Model.withHidden(hiddenIds, id)
   }
 
-  function requestScan(includeGhostty) {
+  function requestScan(includeGhostty, quiet) {
     if (leaseCount <= 0) return
     var requestId = nextRequestId("scan")
     activeScanId = requestId
+    activeScanQuiet = quiet === true
     scanning = true
-    statusMessage = items.length ? "Refreshing…" : "Finding viewports…"
+    if (!activeScanQuiet) statusMessage = items.length ? "Refreshing…" : "Finding things…"
     sendRequest({
       version: 1,
       id: requestId,
@@ -79,19 +82,21 @@ Item {
   }
 
   function refresh() {
-    requestScan(true)
+    requestScan(true, false)
   }
 
   function activate(item) {
-    if (!item || !item.id || !item.activationToken) return
+    if (!item || !item.id) return
+    var token = String(activationTokens[String(item.id)] || item.activationToken || "")
+    if (!token) return
     pendingActivations += 1
-    statusMessage = "Switching to " + String(item.title || "viewport") + "…"
+    statusMessage = "Switching to " + String(item.title || "thing") + "…"
     sendRequest({
       version: 1,
       id: nextRequestId("activate"),
       type: "activate",
       itemId: String(item.id),
-      token: String(item.activationToken)
+      token: token
     })
   }
 
@@ -146,11 +151,24 @@ Item {
     for (var key in providerItems) next[key] = providerItems[key]
     next[String(provider)] = Array.isArray(rows) ? rows : []
     providerItems = next
-    items = Model.mergeProviderItems(next)
+    publishItems(Model.mergeProviderItems(next))
+  }
+
+  function publishItems(rows) {
+    var incoming = Array.isArray(rows) ? rows : []
+    var tokens = {}
+    for (var i = 0; i < incoming.length; i++) {
+      var row = incoming[i]
+      if (row && row.id && row.activationToken)
+        tokens[String(row.id)] = String(row.activationToken)
+    }
+    activationTokens = tokens
+    var reconciled = Model.reconcileItems(items, incoming)
+    if (reconciled.changed) items = reconciled.items
   }
 
   function notifyFailure(message) {
-    var text = String(message || "The viewport is no longer available")
+    var text = String(message || "The thing is no longer available")
     statusMessage = text
     if (!omarchyPath) return
     Quickshell.execDetached([
@@ -190,15 +208,16 @@ Item {
         || String(message.requestId || "") === "event"
       if (!correlated) return
       if (message.full === true) {
-        items = Array.isArray(message.items) ? message.items : []
+        publishItems(message.items)
         providerItems = message.providers && typeof message.providers === "object"
           ? message.providers : providerItems
         warnings = Array.isArray(message.warnings) ? message.warnings : warnings
         if (String(message.requestId || "") === activeScanId) {
           activeScanId = ""
+          activeScanQuiet = false
           scanning = false
           crashCount = 0
-          statusMessage = items.length ? "" : "No actionable viewports found"
+          statusMessage = items.length ? "" : "No actionable things found"
         }
       } else {
         mergePartial(message.provider, message.items)
@@ -212,14 +231,14 @@ Item {
       pendingActivations = Math.max(0, pendingActivations - 1)
       if (message.ok === true) statusMessage = ""
       else notifyFailure(message.message || (message.stale === true
-        ? "That viewport closed before it could be focused"
-        : "Could not focus that viewport"))
+        ? "That thing closed before it could be focused"
+        : "Could not focus that thing"))
       maybeStopTimer.restart()
       return
     }
 
     if (message.type === "error") {
-      appendWarning(message.message || "A viewport provider failed")
+      appendWarning(message.message || "A thing provider failed")
       if (message.requestId && String(message.requestId) === activeScanId && message.final === true)
         scanning = false
     }
@@ -251,14 +270,14 @@ Item {
         root.requestQueue = []
         root.pendingActivations = 0
         if (hadPendingActivation)
-          root.notifyFailure("Everything stopped before it could focus the viewport")
+          root.notifyFailure("Everything stopped before it could focus the thing")
         if (root.leaseCount > 0) restartTimer.restart()
         return
       }
       root.requestQueue = []
       root.pendingActivations = 0
       if (hadPendingActivation)
-        root.notifyFailure("Everything stopped before it could focus the viewport")
+        root.notifyFailure("Everything stopped before it could focus the thing")
       if (root.leaseCount > 0 || root.pendingActivations > 0) {
         root.crashCount += 1
         root.appendWarning("Everything helper stopped unexpectedly (exit " + exitCode + ")")
@@ -272,7 +291,7 @@ Item {
     interval: 2000
     repeat: true
     running: root.leaseCount > 0 && root.helperReady
-    onTriggered: if (!root.scanning) root.requestScan(false)
+    onTriggered: if (!root.scanning) root.requestScan(false, true)
   }
 
   Timer {
@@ -295,7 +314,7 @@ Item {
     repeat: false
     onTriggered: {
       root.ensureHelper()
-      if (root.leaseCount > 0) root.requestScan(true)
+      if (root.leaseCount > 0) root.requestScan(true, false)
     }
   }
 

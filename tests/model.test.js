@@ -36,7 +36,7 @@ const item = (id, title, context, extra = {}) => ({
     item("recent", "same", "same", { recency: 20 }),
     item("active", "same", "same", { active: true, recency: -20 }),
   ]
-  assert.equal(sandbox.rank(rows, "same", {})[0].id, "active", "active viewport wins before recency")
+  assert.equal(sandbox.rank(rows, "same", {})[0].id, "active", "active thing wins before recency")
 }
 
 {
@@ -66,6 +66,37 @@ const item = (id, title, context, extra = {}) => ({
   assert.equal(sandbox.nextIndexAfterRemoval(0, 1), -1)
 }
 
+{
+  const rows = [item("one", "One", ""), item("two", "Two", ""), item("three", "Three", "")]
+  assert.equal(sandbox.indexOfId(rows, "two"), 1)
+  assert.equal(sandbox.indexAfterRefresh(rows, "two", 0), 1, "refresh follows the stable thing id")
+  assert.equal(sandbox.indexAfterRefresh(rows, "closed", 2), 2, "a closed thing keeps the nearest index")
+  assert.equal(sandbox.indexAfterRefresh([], "two", 1), -1)
+  assert.equal(sandbox.clampContentY(900, 0, 1000, 400), 600)
+  assert.equal(sandbox.anchoredContentY(5, 60, 7, 0, 1000, 400), 307)
+}
+
+{
+  const current = [
+    item("one", "One", "", { activationToken: "old-one" }),
+    item("two", "Two", "", { activationToken: "old-two" }),
+  ]
+  const tokenOnlyRefresh = [
+    item("two", "Two", "", { activationToken: "new-two" }),
+    item("one", "One", "", { activationToken: "new-one" }),
+  ]
+  const stable = sandbox.reconcileItems(current, tokenOnlyRefresh)
+  assert.equal(stable.changed, false, "token-only refresh does not replace the visible model")
+  assert.equal(stable.items, current)
+  assert.equal(current[0].activationToken, "new-one")
+  const changed = sandbox.reconcileItems(current, [
+    item("one", "Renamed", "", { activationToken: "latest" }),
+    tokenOnlyRefresh[0],
+  ])
+  assert.equal(changed.changed, true, "a visible field change publishes a new model")
+  assert.equal(changed.items[0].title, "Renamed")
+}
+
 const aliases = [
   ["down", false, false, "", "next"],
   ["n", true, false, "", "next"],
@@ -92,8 +123,14 @@ const qml = fs.readFileSync(path.join(root, "Everything.qml"), "utf8")
 const searchHandler = qml.slice(qml.indexOf("id: searchField"), qml.indexOf("id: statusText"))
 const listHandler = qml.slice(qml.indexOf("id: resultList"), qml.indexOf("delegate: Item"))
 assert.doesNotMatch(searchHandler, /Key_Backspace|Key_Delete/, "search owns editing keys")
-assert.match(listHandler, /Keys\.onPressed[\s\S]*handleListKey/, "list owns viewport commands")
+assert.match(listHandler, /Keys\.onPressed[\s\S]*handleListKey/, "list owns thing commands")
 assert.match(qml, /Key_Backspace[\s\S]*Key_Delete[\s\S]*action = "hide"/, "Backspace and Delete hide list rows")
 assert.match(qml, /root\.close\(\)[\s\S]*Qt\.callLater[\s\S]*everythingService\.activate/, "panel closes before activation")
+assert.match(qml, /onItemsChanged\(\)[\s\S]*scheduleRankedItems\(true\)/, "provider refresh preserves UI state")
+assert.match(qml, /indexAfterRefresh\(rankedItems, selectedThingId/, "selection is restored by stable thing id")
+
+const serviceQml = fs.readFileSync(path.join(root, "Service.qml"), "utf8")
+assert.match(serviceQml, /reconcileItems\(items, incoming\)/, "token-only snapshots keep the visible model stable")
+assert.match(serviceQml, /requestScan\(false, true\)/, "background refreshes do not flash status text")
 
 console.log("model.test.js: all tests passed")

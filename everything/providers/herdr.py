@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ..commands import CommandError, unix_json_request
-from ..model import Viewport, process_birth, stable_id
+from ..model import Thing, process_birth, stable_id
 from ..processes import canonical_path
 from .base import ProviderResult, ScanContext, normalized_address, route_for_process
 from .hyprland import focus_address, launch_terminal_and_focus
@@ -28,7 +28,7 @@ class HerdrProvider:
         except json.JSONDecodeError as error:
             raise CommandError("Herdr session list returned invalid JSON") from error
         sessions = sessions_value.get("sessions", []) if isinstance(sessions_value, dict) else []
-        items: list[Viewport] = []
+        items: list[Thing] = []
         warnings: list[str] = []
         panes_metadata: list[dict[str, Any]] = []
         sessions_metadata: list[dict[str, Any]] = []
@@ -65,7 +65,7 @@ class HerdrProvider:
             focused_tab = str(snapshot.get("focused_tab_id") or "")
             focused_pane = str(snapshot.get("focused_pane_id") or "")
             items.append(
-                Viewport(
+                Thing(
                     id=session_id,
                     kind="herdr-session",
                     provider="Herdr",
@@ -93,7 +93,7 @@ class HerdrProvider:
                 status = str(workspace.get("agent_status") or "unknown")
                 title = str(workspace.get("label") or native_id)
                 items.append(
-                    Viewport(
+                    Thing(
                         id=item_id,
                         kind="herdr-workspace",
                         provider="Herdr",
@@ -120,7 +120,7 @@ class HerdrProvider:
                 tab_ids[native_id] = item_id
                 status = str(tab.get("agent_status") or "unknown")
                 items.append(
-                    Viewport(
+                    Thing(
                         id=item_id,
                         kind="herdr-tab",
                         provider="Herdr",
@@ -152,7 +152,7 @@ class HerdrProvider:
                 )
                 status = str(pane.get("agent_status") or "unknown")
                 items.append(
-                    Viewport(
+                    Thing(
                         id=item_id,
                         kind="herdr-pane",
                         provider="Herdr",
@@ -193,7 +193,7 @@ class HerdrProvider:
                 cwd = canonical_path(str(agent.get("foreground_cwd") or agent.get("cwd") or ""))
                 terminal_title = str(agent.get("terminal_title_stripped") or agent.get("terminal_title") or "")
                 items.append(
-                    Viewport(
+                    Thing(
                         id=item_id,
                         kind="herdr-agent",
                         provider="Herdr",

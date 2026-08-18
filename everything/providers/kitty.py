@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ..commands import CommandError
-from ..model import Viewport, process_birth, stable_id
+from ..model import Thing, process_birth, stable_id
 from ..processes import canonical_path
 from .base import ProviderResult, ScanContext, normalized_address
 from .hyprland import focus_address
@@ -50,7 +50,7 @@ class KittyProvider:
         return sorted(out)
 
     async def scan(self, context: ScanContext) -> ProviderResult:
-        items: list[Viewport] = []
+        items: list[Thing] = []
         warnings: list[str] = []
         surfaces: list[dict[str, Any]] = []
         for socket_path, pid, birth, socket_dev, socket_ino in self.sockets(context):
@@ -83,7 +83,7 @@ class KittyProvider:
                     windows = [window for window in tab.get("windows", []) if isinstance(window, dict)]
                     if not tab_title and windows:
                         tab_title = str(windows[0].get("title") or "Kitty tab")
-                    tab_viewport_id = stable_id(
+                    tab_thing_id = stable_id(
                         self.name,
                         socket_path,
                         socket_dev,
@@ -96,8 +96,8 @@ class KittyProvider:
                     )
                     tab_active = bool(os_window.get("is_focused") and tab.get("is_focused"))
                     items.append(
-                        Viewport(
-                            id=tab_viewport_id,
+                        Thing(
+                            id=tab_thing_id,
                             kind="terminal-tab",
                             provider="Kitty",
                             title=tab_title,
@@ -139,14 +139,14 @@ class KittyProvider:
                             window_id,
                         )
                         items.append(
-                            Viewport(
+                            Thing(
                                 id=pane_id,
                                 kind="terminal-pane",
                                 provider="Kitty",
                                 title=title,
                                 context=cwd or tab_title,
                                 search_terms=["kitty", cwd, tab_title],
-                                parent_id=tab_viewport_id,
+                                parent_id=tab_thing_id,
                                 badges=["Pane"],
                                 active=active,
                                 recency=3800 if active else 0,

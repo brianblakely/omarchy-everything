@@ -213,7 +213,7 @@ class DiscoveryManager:
 
     async def activate(self, request_id: str, item_id: str, token: str) -> None:
         if self.test_mode:
-            await self._activation_response(request_id, item_id, False, True, "Unknown test viewport")
+            await self._activation_response(request_id, item_id, False, True, "Unknown test thing")
             return
         try:
             reference = self.registry.decode_reference(item_id, token)
@@ -223,7 +223,7 @@ class DiscoveryManager:
         provider_name = str(reference["provider"])
         provider = self.providers.get(provider_name)
         if not provider:
-            await self._activation_response(request_id, item_id, False, True, "Viewport provider is unavailable")
+            await self._activation_response(request_id, item_id, False, True, "Thing provider is unavailable")
             return
 
         context = self.context(include_ghostty=provider_name == "ghostty")
@@ -238,9 +238,9 @@ class DiscoveryManager:
             if not row or not self.registry.token_is_current(reference):
                 row = await self._refresh_for_activation(provider_name, item_id, context)
                 if not row:
-                    raise StaleViewport("That viewport closed before it could be focused")
+                    raise StaleThing("That thing closed before it could be focused")
 
-            activation = dict(row.viewport.activation)
+            activation = dict(row.thing.activation)
             activation["item_id"] = item_id
             try:
                 await provider.activate(activation, context)
@@ -251,18 +251,18 @@ class DiscoveryManager:
                 # still be the same row; title-only lookalikes do not qualify.
                 refreshed = await self._refresh_for_activation(provider_name, item_id, context)
                 if not refreshed:
-                    raise StaleViewport("That viewport closed before it could be focused") from first_error
-                activation = dict(refreshed.viewport.activation)
+                    raise StaleThing("That thing closed before it could be focused") from first_error
+                activation = dict(refreshed.thing.activation)
                 activation["item_id"] = item_id
                 await provider.activate(activation, context)
         except Exception as error:
-            stale = isinstance(error, StaleViewport) or self._looks_stale(error)
+            stale = isinstance(error, StaleThing) or self._looks_stale(error)
             await self._activation_response(
                 request_id,
                 item_id,
                 False,
                 stale,
-                self._error_text(error) or "Could not focus that viewport",
+                self._error_text(error) or "Could not focus that thing",
             )
             return
         await self._activation_response(request_id, item_id, True, False, "")
@@ -326,5 +326,5 @@ class DiscoveryManager:
         }.get(provider, provider)
 
 
-class StaleViewport(CommandError):
+class StaleThing(CommandError):
     pass

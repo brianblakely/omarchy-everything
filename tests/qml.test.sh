@@ -43,13 +43,15 @@ env \
 
 if ! grep -Fq 'EVERYTHING_LOAD_OK service' "$RUNTIME_TMP/quickshell.log" \
     || ! grep -Fq 'EVERYTHING_LOAD_OK widget' "$RUNTIME_TMP/quickshell.log" \
-    || ! grep -Fq 'EVERYTHING_LEASE_OK' "$RUNTIME_TMP/quickshell.log"; then
+    || ! grep -Fq 'EVERYTHING_LEASE_OK' "$RUNTIME_TMP/quickshell.log" \
+    || ! grep -Fq 'EVERYTHING_REFRESH_OK' "$RUNTIME_TMP/quickshell.log"; then
   sed -n '1,260p' "$RUNTIME_TMP/quickshell.log" >&2
   exit 1
 fi
 if grep -Fq 'EVERYTHING_LOAD_ERROR' "$RUNTIME_TMP/quickshell.log" \
     || grep -Fq 'EVERYTHING_CREATE_ERROR' "$RUNTIME_TMP/quickshell.log" \
-    || grep -Fq 'EVERYTHING_LEASE_ERROR' "$RUNTIME_TMP/quickshell.log"; then
+    || grep -Fq 'EVERYTHING_LEASE_ERROR' "$RUNTIME_TMP/quickshell.log" \
+    || grep -Fq 'EVERYTHING_REFRESH_ERROR' "$RUNTIME_TMP/quickshell.log"; then
   sed -n '1,260p' "$RUNTIME_TMP/quickshell.log" >&2
   exit 1
 fi

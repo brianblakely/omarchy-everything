@@ -17,7 +17,7 @@ from everything.server import JsonLineServer  # noqa: E402
 
 
 def arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Everything viewport helper")
+    parser = argparse.ArgumentParser(description="Everything helper")
     parser.add_argument("--json-lines", action="store_true", help="serve the versioned stdin/stdout protocol")
     parser.add_argument("--atspi-guard", type=int, metavar="PARENT_PID", help=argparse.SUPPRESS)
     parser.add_argument("--test-mode", action="store_true", help=argparse.SUPPRESS)
@@ -37,4 +37,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -6,7 +6,7 @@ import re
 from typing import Any
 
 from ..commands import CommandError
-from ..model import Viewport, process_birth, stable_id
+from ..model import Thing, process_birth, stable_id
 from .base import ProviderResult, ScanContext, normalized_address
 
 
@@ -91,7 +91,7 @@ class HyprlandProvider:
             raise CommandError("hyprctl client response was not a list")
 
         context.hypr_clients = [client for client in clients if isinstance(client, dict)]
-        items: list[Viewport] = []
+        items: list[Thing] = []
         metadata_clients: list[dict[str, Any]] = []
         for client in context.hypr_clients:
             if client.get("mapped") is False:
@@ -115,7 +115,7 @@ class HyprlandProvider:
             focus_history = int(client.get("focusHistoryID") or 0)
             item_id = stable_id(self.name, address, pid, birth)
             items.append(
-                Viewport(
+                Thing(
                     id=item_id,
                     kind="window",
                     provider="Hyprland",

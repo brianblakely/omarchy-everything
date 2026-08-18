@@ -72,7 +72,7 @@ function kindLabel(kind) {
     "herdr-agent": "Herdr agent",
     "neovim-buffer": "Neovim buffer"
   }
-  return labels[String(kind)] || String(kind || "Viewport")
+  return labels[String(kind)] || String(kind || "Thing")
 }
 
 function rankedEntry(item, tokens, sourceIndex) {
@@ -146,6 +146,43 @@ function rank(items, query, hiddenIds) {
   return ranked.map(function(entry) { return entry.item })
 }
 
+function indexOfId(items, id) {
+  var source = Array.isArray(items) ? items : []
+  var wanted = String(id || "")
+  if (!wanted) return -1
+  for (var i = 0; i < source.length; i++) {
+    if (source[i] && String(source[i].id || "") === wanted) return i
+  }
+  return -1
+}
+
+function indexAfterRefresh(items, selectedId, indexHint) {
+  var source = Array.isArray(items) ? items : []
+  if (source.length === 0) return -1
+  var exact = indexOfId(source, selectedId)
+  if (exact >= 0) return exact
+  var hint = Number(indexHint)
+  if (!isFinite(hint)) hint = 0
+  return Math.max(0, Math.min(source.length - 1, Math.floor(hint)))
+}
+
+function clampContentY(value, originY, contentHeight, viewHeight) {
+  var origin = Number(originY || 0)
+  var content = Math.max(0, Number(contentHeight || 0))
+  var visible = Math.max(0, Number(viewHeight || 0))
+  var maximum = origin + Math.max(0, content - visible)
+  var wanted = Number(value)
+  if (!isFinite(wanted)) wanted = origin
+  return Math.max(origin, Math.min(maximum, wanted))
+}
+
+function anchoredContentY(index, rowHeight, offset, originY, contentHeight, viewHeight) {
+  var row = Math.max(1, Number(rowHeight || 1))
+  var anchor = Math.max(0, Math.floor(Number(index || 0)))
+  var wanted = Number(originY || 0) + anchor * row + Number(offset || 0)
+  return clampContentY(wanted, originY, contentHeight, viewHeight)
+}
+
 function nextIndexAfterRemoval(index, lengthBefore) {
   var remaining = Math.max(0, Number(lengthBefore || 0) - 1)
   if (remaining === 0) return -1
@@ -158,6 +195,62 @@ function withHidden(hiddenIds, id) {
   for (var key in current) next[key] = current[key]
   if (id) next[String(id)] = true
   return next
+}
+
+function sameStringList(left, right) {
+  var a = stringList(left)
+  var b = stringList(right)
+  if (a.length !== b.length) return false
+  for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
+}
+
+function samePresentation(left, right) {
+  if (!left || !right) return false
+  return String(left.id || "") === String(right.id || "")
+    && String(left.kind || "") === String(right.kind || "")
+    && String(left.provider || "") === String(right.provider || "")
+    && String(left.title || "") === String(right.title || "")
+    && String(left.context || "") === String(right.context || "")
+    && String(left.parentId || "") === String(right.parentId || "")
+    && (left.active === true) === (right.active === true)
+    && Number(left.recency || 0) === Number(right.recency || 0)
+    && sameStringList(left.searchTerms, right.searchTerms)
+    && sameStringList(left.badges, right.badges)
+}
+
+function reconcileItems(currentItems, incomingItems) {
+  var current = Array.isArray(currentItems) ? currentItems : []
+  var incoming = Array.isArray(incomingItems) ? incomingItems : []
+  var existing = {}
+  var changed = current.length !== incoming.length
+  for (var i = 0; i < current.length; i++) {
+    var oldId = current[i] && String(current[i].id || "")
+    if (!oldId || existing[oldId]) changed = true
+    else existing[oldId] = current[i]
+  }
+
+  var next = []
+  var seen = {}
+  for (var row = 0; row < incoming.length; row++) {
+    var fresh = incoming[row]
+    var id = fresh && String(fresh.id || "")
+    var previous = id ? existing[id] : null
+    if (!id || seen[id] || !samePresentation(previous, fresh)) {
+      changed = true
+      next.push(fresh)
+    } else {
+      // Activation generations change on every provider scan. Keep the row
+      // object stable when only its opaque token changes so Qt does not tear
+      // down and rebuild a visually identical list.
+      if (fresh.activationToken) previous.activationToken = fresh.activationToken
+      next.push(previous)
+    }
+    if (id) seen[id] = true
+  }
+
+  if (!changed) return { items: current, changed: false }
+  return { items: next, changed: true }
 }
 
 // Canonical names used by both the QML key handler and its table-driven tests.

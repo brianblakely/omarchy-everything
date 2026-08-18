@@ -48,7 +48,7 @@ def stable_id(provider: str, *parts: Any) -> str:
 
 
 @dataclass(slots=True)
-class Viewport:
+class Thing:
     id: str
     kind: str
     provider: str
@@ -63,11 +63,11 @@ class Viewport:
 
     def __post_init__(self) -> None:
         if not self.id or "\n" in self.id or "\r" in self.id:
-            raise ValueError("viewport id must be a non-empty single line")
+            raise ValueError("thing id must be a non-empty single line")
         if self.kind not in SUPPORTED_KINDS:
-            raise ValueError(f"unsupported viewport kind: {self.kind}")
+            raise ValueError(f"unsupported thing kind: {self.kind}")
         if not self.provider:
-            raise ValueError("viewport provider is required")
+            raise ValueError("provider is required for every thing")
         self.title = str(self.title or "Untitled").strip() or "Untitled"
         self.context = str(self.context or "").strip()
         self.search_terms = _unique_strings(self.search_terms)
@@ -103,15 +103,15 @@ def _unique_strings(values: Iterable[Any] | None) -> list[str]:
     return out
 
 
-def dedupe_viewports(items: Iterable[Viewport]) -> list[Viewport]:
+def dedupe_things(items: Iterable[Thing]) -> list[Thing]:
     """Keep native identities unique while preserving genuine duplicates.
 
     Equal rows are merged. A provider bug that emits the same id for distinct
     targets gets a deterministic collision suffix rather than silently making
-    one viewport unreachable.
+    one thing unreachable.
     """
 
-    out: list[Viewport] = []
+    out: list[Thing] = []
     positions: dict[str, int] = {}
     collision_counts: dict[str, int] = {}
     for item in items:
@@ -189,8 +189,8 @@ def _unb64(value: str) -> bytes:
 
 
 @dataclass(slots=True)
-class PublishedViewport:
-    viewport: Viewport
+class PublishedThing:
+    thing: Thing
     token: str
     generation: int
 
@@ -199,26 +199,26 @@ class SnapshotRegistry:
     def __init__(self, codec: TokenCodec | None = None) -> None:
         self.codec = codec or TokenCodec()
         self.generations: dict[str, int] = {}
-        self.providers: dict[str, dict[str, PublishedViewport]] = {}
+        self.providers: dict[str, dict[str, PublishedThing]] = {}
 
-    def publish(self, provider: str, items: Iterable[Viewport]) -> list[dict[str, Any]]:
+    def publish(self, provider: str, items: Iterable[Thing]) -> list[dict[str, Any]]:
         generation = self.generations.get(provider, 0) + 1
         self.generations[provider] = generation
-        published: dict[str, PublishedViewport] = {}
+        published: dict[str, PublishedThing] = {}
         public: list[dict[str, Any]] = []
-        for viewport in dedupe_viewports(items):
+        for thing in dedupe_things(items):
             payload = {
                 "provider": provider,
-                "id": viewport.id,
+                "id": thing.id,
                 "generation": generation,
                 # The activation body remains opaque to QML and authenticated;
                 # keeping it here also makes helper restart tokens invalid.
-                "activation": viewport.activation,
+                "activation": thing.activation,
             }
             token = self.codec.encode(payload)
-            row = PublishedViewport(viewport, token, generation)
-            published[viewport.id] = row
-            public.append(viewport.public(token))
+            row = PublishedThing(thing, token, generation)
+            published[thing.id] = row
+            public.append(thing.public(token))
         self.providers[provider] = published
         return public
 
@@ -231,7 +231,7 @@ class SnapshotRegistry:
             raise TokenError("activation token has no provider")
         return payload
 
-    def current(self, provider: str, item_id: str) -> PublishedViewport | None:
+    def current(self, provider: str, item_id: str) -> PublishedThing | None:
         return self.providers.get(provider, {}).get(item_id)
 
     def token_is_current(self, payload: dict[str, Any]) -> bool:
@@ -244,12 +244,12 @@ class SnapshotRegistry:
         rows: list[dict[str, Any]] = []
         for provider in sorted(self.providers):
             for published in self.providers[provider].values():
-                rows.append(published.viewport.public(published.token))
+                rows.append(published.thing.public(published.token))
         return rows
 
     def provider_public(self, provider: str) -> list[dict[str, Any]]:
         return [
-            published.viewport.public(published.token)
+            published.thing.public(published.token)
             for published in self.providers.get(provider, {}).values()
         ]
 

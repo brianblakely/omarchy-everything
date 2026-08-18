@@ -9,8 +9,8 @@ birth before focusing the exact address through current `hl.dsp.focus`.
 Layer surfaces are outside the clients API and are not results.
 
 Foot and Alacritty have no internal Linux tab/split adapter in the supported
-versions. Their complete native viewport set is therefore their exact managed
-windows. tmux, Herdr, and Neovim nested inside them are still expanded. This
+versions, so their only native things are their exact managed windows. tmux,
+Herdr, and Neovim nested inside them are still expanded. This
 matches [Alacritty's explicit non-goal of providing tabs or splits](https://github.com/alacritty/alacritty#faq).
 
 ## Browser and application tabs

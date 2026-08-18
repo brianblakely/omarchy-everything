@@ -1,10 +1,11 @@
 # Everything
 List, search, and browse to every app, tab, window, agent... everything. An Omarchy plugin.
 
-Everything 0.0.1 is a native Omarchy Quattro viewport switcher. Its chevron
-button (`nf-fa-chevron_down`, U+F078) opens a keyboard-first search panel for
-actionable windows, native tabs, terminal panes, tmux and Herdr containers,
-Herdr agents, and Neovim buffers.
+Everything 0.0.1 is a native Omarchy Quattro switcher for windows, tabs,
+panes, and other actionable things. Its chevron button
+(`nf-fa-chevron_down`, U+F078) opens a keyboard-first search panel for native
+tabs, terminal panes, tmux and Herdr containers, Herdr agents, Neovim buffers,
+and every managed window.
 
 It targets the current Omarchy 4 shell/plugin API and the application
 interfaces shipped with that release. There are no legacy Hyprland,
@@ -64,7 +65,7 @@ Lua config, validate it with `hyprctl reload` and `hyprctl configerrors`.
 Search owns focus whenever the panel opens. Printable input, Backspace, and
 Delete edit the query there. Every space-separated query token must fuzzily
 match a title, breadcrumb/context, provider, type, badge, or search term;
-title matches rank first, followed by context/type, the current viewport, and
+title matches rank first, followed by context/type, the current thing, and
 recency.
 
 | Focus | Keys | Action |
@@ -73,7 +74,7 @@ recency.
 | List | `Up`, `Down`, `Ctrl+P`, `Ctrl+N` | Move one result |
 | List | `Home`, `End`, `g`, `G` | Move to the first or last result |
 | List | `Page Up`, `Page Down`, `Ctrl+U`, `Ctrl+D` | Move one visible page |
-| List | `Enter` | Close Everything, then activate the highlighted viewport |
+| List | `Enter` | Close Everything, then activate the highlighted thing |
 | List | `/`, `Shift+Tab` | Return to search |
 | List | `Backspace`, `Delete` | Hide only the actively highlighted result |
 | Either | `Escape` | Clear a nonempty query and return to search; a second press closes |
@@ -81,6 +82,10 @@ recency.
 Hidden IDs stay filtered across refreshes and panel reopenings. They are held
 only in the shell service's memory and reset when this plugin service or
 `omarchy-shell` reloads.
+
+Background provider refreshes preserve the query, highlighted thing, scroll
+anchor, and keyboard focus. Editing the query intentionally starts the newly
+filtered list at its first result.
 
 ## What appears
 
@@ -97,7 +102,7 @@ only in the shell service's memory and reset when this plugin service or
   hidden, loaded, and unloaded buffers.
 
 Processes are routing metadata, never results. A shell, `btop`, or any other
-ordinary process appears only through an actionable containing viewport.
+ordinary process appears only through an actionable containing thing.
 Applications without a reliable current native-tab adapter remain available
 as their exact outer Hyprland windows. Page-authored ARIA tabs, web/editor DOM
 tabs, layers, and arbitrary `/proc` entries are never listed.

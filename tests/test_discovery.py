@@ -4,12 +4,12 @@ import asyncio
 import unittest
 
 from everything.discovery import DiscoveryManager
-from everything.model import Viewport
+from everything.model import Thing
 from everything.providers.base import ProviderResult
 
 
-def viewport(provider: str, identifier: str) -> Viewport:
-    return Viewport(
+def thing(provider: str, identifier: str) -> Thing:
+    return Thing(
         id=f"{provider}:{identifier}",
         kind="window",
         provider=provider.title(),
@@ -57,14 +57,14 @@ class DiscoveryTests(unittest.IsolatedAsyncioTestCase):
         manager.providers = {
             "hyprland": StaticProvider(
                 "hyprland",
-                ProviderResult("hyprland", [viewport("hyprland", "outer")]),
+                ProviderResult("hyprland", [thing("hyprland", "outer")]),
             ),
             "kitty": StaticProvider(
-                "kitty", ProviderResult("kitty", [viewport("kitty", "pane")])
+                "kitty", ProviderResult("kitty", [thing("kitty", "pane")])
             ),
             "tmux": StaticProvider("tmux", error=RuntimeError("socket changed")),
         }
-        manager.registry.publish("tmux", [viewport("tmux", "old")])
+        manager.registry.publish("tmux", [thing("tmux", "old")])
 
         await manager.scan("scan-1", include_ghostty=False)
 

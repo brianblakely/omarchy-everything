@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ..commands import CommandError
-from ..model import Viewport, process_birth, stable_id
+from ..model import Thing, process_birth, stable_id
 from ..processes import canonical_path, username
 from .base import ProviderResult, ScanContext, normalized_address
 from .hyprland import launch_terminal_and_focus
@@ -108,7 +108,7 @@ class NeovimProvider:
         return value
 
     async def scan(self, context: ScanContext) -> ProviderResult:
-        items: list[Viewport] = []
+        items: list[Thing] = []
         warnings: list[str] = []
         servers: list[dict[str, Any]] = []
         for socket in self.discover_sockets(context):
@@ -176,7 +176,7 @@ class NeovimProvider:
                     "ambiguous_ghostty": ambiguous_ghostty,
                 }
                 items.append(
-                    Viewport(
+                    Thing(
                         id=item_id,
                         kind="neovim-buffer",
                         provider="Neovim",

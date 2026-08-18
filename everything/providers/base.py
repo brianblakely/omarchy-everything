@@ -4,14 +4,14 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from ..commands import CommandRunner
-from ..model import Viewport, process_birth
+from ..model import Thing, process_birth
 from ..processes import ProcTable, canonical_path
 
 
 @dataclass(slots=True)
 class ProviderResult:
     provider: str
-    items: list[Viewport] = field(default_factory=list)
+    items: list[Thing] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 

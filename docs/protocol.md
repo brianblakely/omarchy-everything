@@ -57,7 +57,7 @@ Activation always completes with an explicit result. `stale: true` means the
 native identity closed, was reused, or no longer matches its scan fingerprint:
 
 ```json
-{"version":1,"type":"activation","requestId":"activate-8","itemId":"provider:native-id","ok":false,"stale":true,"message":"That viewport closed before it could be focused"}
+{"version":1,"type":"activation","requestId":"activate-8","itemId":"provider:native-id","ok":false,"stale":true,"message":"That thing closed before it could be focused"}
 ```
 
 Malformed input and isolated provider failures use:
@@ -77,14 +77,14 @@ Every public item contains:
 | Field | Meaning |
 |---|---|
 | `id` | Stable provider/native identity, including process birth or socket identity where reuse is possible |
-| `kind` | One supported actionable viewport kind |
+| `kind` | One supported actionable thing kind |
 | `provider` | Human-readable provider badge |
 | `title` | Primary search and display title |
 | `context` | Cwd, application, workspace, or container context |
 | `searchTerms` | Additional non-rendered matching terms |
-| `parentId` | Parent viewport used to build breadcrumbs |
+| `parentId` | Parent thing used to build breadcrumbs |
 | `badges` | Status/type annotations |
-| `active` | Whether this is the provider's current viewport |
+| `active` | Whether this is the provider's current thing |
 | `recency` | Provider-local ranking hint |
 | `activationToken` | Authenticated, process-local opaque activation reference |
 

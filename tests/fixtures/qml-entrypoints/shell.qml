@@ -7,6 +7,13 @@ ShellRoot {
   readonly property string sourceDir: Quickshell.env("EVERYTHING_SOURCE_DIR")
   property var serviceObject: null
   property var widgetObject: null
+  property var searchObject: null
+  property var listObject: null
+  property int refreshTestStage: 0
+  property string selectedBeforeRefresh: ""
+  property string anchorBeforeRefresh: ""
+  property real selectedOffsetBeforeRefresh: 0
+  property bool listFocusedBeforeRefresh: false
 
   function manifestData(source) {
     return {
@@ -22,6 +29,102 @@ ShellRoot {
 
   function component(fileName) {
     return Qt.createComponent(encodeURI("file://" + sourceDir + "/" + fileName), Component.PreferSynchronous)
+  }
+
+  function findNamed(object, name) {
+    if (!object) return null
+    if (String(object.objectName || "") === name) return object
+    var descendants = object.children || []
+    for (var i = 0; i < descendants.length; i++) {
+      var match = findNamed(descendants[i], name)
+      if (match) return match
+    }
+    return null
+  }
+
+  function rows(reverseOrder) {
+    var out = []
+    for (var i = 0; i < 40; i++) {
+      out.push({
+        id: "test:" + String(i).padStart(2, "0"),
+        kind: "window",
+        provider: "Test",
+        title: "Shared thing",
+        context: "Refresh fixture",
+        searchTerms: [],
+        parentId: "",
+        badges: [],
+        active: false,
+        recency: reverseOrder ? i : 100 - i,
+        activationToken: "token-" + (reverseOrder ? "new-" : "old-") + i
+      })
+    }
+    return out
+  }
+
+  function resultId(index) {
+    if (index < 0 || index >= widgetObject.rankedItems.length) return ""
+    return String(widgetObject.rankedItems[index].id || "")
+  }
+
+  function failRefreshTest(message) {
+    console.error("EVERYTHING_REFRESH_ERROR " + message)
+    refreshTestTimer.stop()
+    Qt.quit()
+  }
+
+  function refreshTestTick() {
+    if (refreshTestStage === 0) {
+      searchObject = findNamed(widgetObject, "everything-search")
+      listObject = findNamed(widgetObject, "everything-results")
+      if (!searchObject || !listObject) {
+        failRefreshTest("controls not found")
+        return
+      }
+      serviceObject.items = rows(false)
+    } else if (refreshTestStage === 1) {
+      searchObject.text = "shared"
+    } else if (refreshTestStage === 2) {
+      if (widgetObject.rankedItems.length !== 40) {
+        failRefreshTest("initial result count")
+        return
+      }
+      widgetObject.focusList(16)
+      listObject.contentY = listObject.originY + widgetObject.rowHeight * 14 + 7
+      selectedBeforeRefresh = resultId(listObject.currentIndex)
+      var top = Math.floor((listObject.contentY - listObject.originY) / widgetObject.rowHeight)
+      anchorBeforeRefresh = resultId(top)
+      selectedOffsetBeforeRefresh = listObject.currentIndex * widgetObject.rowHeight - listObject.contentY
+      listFocusedBeforeRefresh = listObject.activeFocus
+      serviceObject.items = rows(true)
+    } else if (refreshTestStage === 3) {
+      if (searchObject.text !== "shared") {
+        failRefreshTest("query changed")
+        return
+      }
+      if (resultId(listObject.currentIndex) !== selectedBeforeRefresh) {
+        failRefreshTest("selection changed")
+        return
+      }
+      if (listFocusedBeforeRefresh) {
+        var selectedOffset = listObject.currentIndex * widgetObject.rowHeight - listObject.contentY
+        if (Math.abs(selectedOffset - selectedOffsetBeforeRefresh) > 1) {
+          failRefreshTest("highlight moved")
+          return
+        }
+      } else {
+        var topAfter = Math.floor((listObject.contentY - listObject.originY) / widgetObject.rowHeight)
+        if (resultId(topAfter) !== anchorBeforeRefresh) {
+          failRefreshTest("scroll anchor changed")
+          return
+        }
+      }
+      console.log("EVERYTHING_REFRESH_OK")
+      refreshTestTimer.stop()
+      Qt.quit()
+      return
+    }
+    refreshTestStage += 1
   }
 
   function loadEntries() {
@@ -65,7 +168,7 @@ ShellRoot {
       return
     }
     console.log("EVERYTHING_LOAD_OK widget")
-    Qt.callLater(Qt.quit)
+    refreshTestTimer.start()
   }
 
   Item { id: host }
@@ -102,5 +205,11 @@ ShellRoot {
     repeat: false
     onTriggered: root.loadEntries()
   }
-}
 
+  Timer {
+    id: refreshTestTimer
+    interval: 20
+    repeat: true
+    onTriggered: root.refreshTestTick()
+  }
+}

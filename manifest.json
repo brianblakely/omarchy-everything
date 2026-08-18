@@ -4,7 +4,7 @@
   "name": "Everything",
   "version": "0.0.1",
   "author": "Brian Blakely",
-  "description": "Search and switch to every actionable local viewport",
+  "description": "Search and switch to every actionable local thing",
   "license": "MIT",
   "kinds": ["service", "bar-widget"],
   "keepLoaded": true,

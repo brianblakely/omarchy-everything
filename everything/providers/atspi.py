@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Iterator
 
 from ..commands import CommandError
-from ..model import Viewport, process_birth, stable_id
+from ..model import Thing, process_birth, stable_id
 from .base import ProviderResult, ScanContext, normalized_address
 from .hyprland import focus_address
 
@@ -330,7 +330,7 @@ class AtspiProvider:
     def _scan_sync(self, context: ScanContext) -> ProviderResult:
         tree = AtspiTree()
         objects: dict[str, NativeTab] = {}
-        items: list[Viewport] = []
+        items: list[Thing] = []
         top_levels = tree.top_levels(context)
         for top in top_levels:
             app_class = str(top.client.get("class") or top.client.get("initialClass") or "")
@@ -349,7 +349,7 @@ class AtspiProvider:
                 item_id = stable_id(self.name, pid, birth, address, tab.native_id)
                 objects[item_id] = tab
                 items.append(
-                    Viewport(
+                    Thing(
                         id=item_id,
                         kind=kind,
                         provider=provider_name,

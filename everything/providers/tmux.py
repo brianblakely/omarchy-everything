@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ..commands import CommandError
-from ..model import Viewport, process_birth, stable_id
+from ..model import Thing, process_birth, stable_id
 from ..processes import canonical_path
 from .base import ProviderResult, ScanContext, route_for_process
 from .hyprland import launch_terminal_and_focus
@@ -65,7 +65,7 @@ class TmuxProvider:
         return rows
 
     async def scan(self, context: ScanContext) -> ProviderResult:
-        items: list[Viewport] = []
+        items: list[Thing] = []
         warnings: list[str] = []
         panes_meta: list[dict[str, Any]] = []
         sockets_meta: list[dict[str, Any]] = []
@@ -125,7 +125,7 @@ class TmuxProvider:
                 item_id = stable_id(self.name, socket, server_pid, birth, native_id)
                 session_ids[native_id] = item_id
                 items.append(
-                    Viewport(
+                    Thing(
                         id=item_id,
                         kind="tmux-session",
                         provider="tmux",
@@ -143,7 +143,7 @@ class TmuxProvider:
                 item_id = stable_id(self.name, socket, server_pid, birth, native_id)
                 window_ids[native_id] = item_id
                 items.append(
-                    Viewport(
+                    Thing(
                         id=item_id,
                         kind="tmux-window",
                         provider="tmux",
@@ -165,7 +165,7 @@ class TmuxProvider:
                 activation = self._activation(socket, server_pid, birth, native_id, "pane", clients, session_id)
                 activation["pane_pid"] = int(pane_pid or 0)
                 items.append(
-                    Viewport(
+                    Thing(
                         id=item_id,
                         kind="tmux-pane",
                         provider="tmux",
