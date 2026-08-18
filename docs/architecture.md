@@ -94,7 +94,8 @@ per source update; both ranking and QML use that same index for breadcrumbs and
 tmux window/pane and Herdr workspace/tab/pane metadata. These child rows show
 only their immediate parent's title, while agent and session metadata retain
 their status semantics. Neovim buffer metadata bypasses status priority and
-uses the canonical containing directory supplied by its provider.
+shows only the final component of the canonical containing directory supplied
+by its provider. The complete path remains provider context for native routing.
 
 ## Helper and provider ownership
 

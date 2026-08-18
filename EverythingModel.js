@@ -450,12 +450,22 @@ function contextMetadata(item, breadcrumb) {
   return value || provider
 }
 
+function pathLeaf(value) {
+  var path = String(value || "").trim()
+  if (!path) return ""
+  var withoutTrailingSlash = path.replace(/\/+$/, "")
+  if (!withoutTrailingSlash) return "/"
+  var separator = withoutTrailingSlash.lastIndexOf("/")
+  return separator >= 0
+    ? withoutTrailingSlash.slice(separator + 1) : withoutTrailingSlash
+}
+
 function vitalMetadata(item, breadcrumb, parentTitle) {
   if (!item) return ""
   var kind = String(item.kind || "")
   if (kind === "neovim-buffer") {
-    var directory = String(item.context || "").trim()
-    return directory || String(item.provider || "")
+    var directoryLeaf = pathLeaf(item.context)
+    return directoryLeaf || String(item.provider || "")
   }
   if (kind === "tmux-window" || kind === "tmux-pane") {
     var tmuxParent = String(parentTitle || "").trim()

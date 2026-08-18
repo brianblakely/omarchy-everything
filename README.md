@@ -90,8 +90,9 @@ as pills. The right-side value
 never repeats the kind already communicated by the section and icon. tmux
 windows and panes, plus Herdr workspaces, tabs, and panes, show their immediate
 parent's name there. tmux sessions and Herdr agents/sessions retain their own
-status metadata. Buffers show their containing directory; unnamed buffers use
-the editor's working directory.
+status metadata. Buffers show only the final name of their containing
+directory; unnamed buffers show only the final name of the editor's working
+directory.
 
 | Focus | Keys | Action |
 |---|---|---|

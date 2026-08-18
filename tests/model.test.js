@@ -246,7 +246,15 @@ const item = (id, title, context, extra = {}) => ({
     item("buffer", "File", "/tmp/project", {
       kind: "neovim-buffer", badges: ["Buffer", "Modified", "Visible"],
     }), "Container › /tmp/project"),
-    "/tmp/project", "buffer metadata is its containing directory, not status or ancestry")
+    "project", "buffer metadata is its directory leaf, not a full path, status, or ancestry")
+  assert.equal(sandbox.vitalMetadata(
+    item("trailing-buffer", "File", "/tmp/project/src/", {
+      kind: "neovim-buffer", badges: ["Buffer"],
+    }), ""), "src", "buffer metadata ignores trailing path separators")
+  assert.equal(sandbox.vitalMetadata(
+    item("root-buffer", "File", "/", {
+      kind: "neovim-buffer", badges: ["Buffer"],
+    }), ""), "/", "the filesystem root remains meaningful buffer metadata")
   assert.equal(sandbox.vitalMetadata(
     item("browser", "Site", "Browser · native tab", { kind: "browser-tab", provider: "Firefox", badges: ["Tab", "Title only"] }), ""),
     "Firefox")

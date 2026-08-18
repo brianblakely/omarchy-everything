@@ -136,6 +136,8 @@ Named buffer rows use the filename as their title and its canonical containing
 directory as their display context. An unnamed buffer uses the editor's
 canonical working directory. Status badges remain available to accessibility
 and activation continues to use the separately revalidated canonical name.
+The presentation model reduces that context to its final path component for
+the row's metadata; routing retains the complete canonical path.
 
 Activation revalidates socket owner, process birth, buffer number, and
 canonical name. The first existing window/tab showing the buffer is selected

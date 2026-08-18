@@ -20,7 +20,7 @@ The suite performs:
   precedence, glyph-colored image fallback, generic fallback and Herdr agent
   glyphs, one-line row density, vital-metadata selection,
   JavaScript/Qt-list badge normalization, exclusion of redundant kind labels,
-  tmux and Herdr immediate-parent metadata, Neovim containing-directory
+  tmux and Herdr immediate-parent metadata, Neovim containing-directory leaf
   metadata, and absence of visual metadata pills;
 - absence of panel scan, count, warning, and empty-result messages while
   automatic discovery continues;
@@ -130,9 +130,10 @@ single refresh followed by a visible stale notification.
   existing windows on another tab; standalone, tmux-nested, and Herdr-nested
   servers. Confirm a displayed buffer selects its first existing window and
   never starts a new terminal attach or remote UI; confirm `:hide buffer`
-  preserves modified buffers. Confirm every named buffer shows its canonical
-  containing directory and an unnamed buffer shows the editor working
-  directory, regardless of modified/loaded/displayed status badges.
+  preserves modified buffers. Confirm every named buffer shows only the final
+  component of its canonical containing directory and an unnamed buffer shows
+  only the final component of the editor working directory, regardless of
+  modified/loaded/displayed status badges.
 - Put nested Neovim instances in duplicate-cwd Herdr panes and multi-split
   Ghostty surfaces. Confirm inherited Herdr pane IDs disambiguate duplicate
   cwd values, and only hidden buffers with ambiguous hosts open a fresh
@@ -170,7 +171,7 @@ single refresh followed by a visible stale notification.
   states, modified buffers, detached sessions, and special workspaces; confirm
   a known window app uses Omarchy's Nerd Font glyph, an unmapped window image
   is recolored to the same selected/unselected foreground, Herdr agents use the
-  shell's agent robot, buffers show their containing directory, and unresolved
+  shell's agent robot, buffers show only their directory leaf, and unresolved
   windows use the window fallback. Confirm text elides without overlap, kind
   labels never repeat in the right-side value, and no pill-shaped metadata is
   rendered.
