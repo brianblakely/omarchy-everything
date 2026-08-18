@@ -46,11 +46,12 @@ ShellRoot {
   function rows(reverseOrder, tokenGeneration, recencyOffset) {
     var out = []
     var offset = Number(recencyOffset || 0)
+    var kinds = ["window", "browser-tab", "terminal-pane", "neovim-buffer"]
     for (var i = 0; i < 40; i++) {
       out.push({
         id: "test:" + String(i).padStart(2, "0"),
         uiUuid: "00000000-0000-5000-8000-" + String(i).padStart(12, "0"),
-        kind: "window",
+        kind: kinds[Math.floor(i / 10)],
         provider: "Test",
         title: "Shared thing",
         context: "Refresh fixture",
@@ -68,6 +69,13 @@ ShellRoot {
   function resultId(index) {
     if (index < 0 || index >= widgetObject.rankedItems.length) return ""
     return String(widgetObject.rankedItems[index].id || "")
+  }
+
+  function resultVisualOffset(index) {
+    var row = listObject && typeof listObject.itemAtIndex === "function"
+      ? listObject.itemAtIndex(index) : null
+    var top = row ? Number(row.y) : listObject.originY + widgetObject.rowTopAt(index)
+    return top - listObject.contentY
   }
 
   function failRefreshTest(message) {
@@ -93,6 +101,10 @@ ShellRoot {
         failRefreshTest("initial result count")
         return
       }
+      if (!findNamed(widgetObject, "everything-section-window")) {
+        failRefreshTest("kind section was not rendered")
+        return
+      }
       widgetObject.focusList(16)
       keyCatcherObject.moveRequested(0, 1)
       if (listObject.currentIndex !== 17) {
@@ -104,9 +116,9 @@ ShellRoot {
         failRefreshTest("shell horizontal movement was not routed")
         return
       }
-      listObject.contentY = listObject.originY + widgetObject.rowHeight * 14 + 7
+      listObject.contentY = listObject.originY + widgetObject.rowTopAt(14) + 7
       selectedBeforeRefresh = resultId(listObject.currentIndex)
-      selectedOffsetBeforeRefresh = listObject.currentIndex * widgetObject.rowHeight - listObject.contentY
+      selectedOffsetBeforeRefresh = resultVisualOffset(listObject.currentIndex)
       rankedBeforeRefresh = widgetObject.rankedItems
       serviceObject.items = rows(false, "two", 500)
     } else if (refreshTestStage === 3) {
@@ -125,9 +137,13 @@ ShellRoot {
         return
       }
       if (listObject.contentHeight > listObject.height + 0.5) {
-        var selectedOffset = listObject.currentIndex * widgetObject.rowHeight - listObject.contentY
+        var selectedOffset = resultVisualOffset(listObject.currentIndex)
         if (Math.abs(selectedOffset - selectedOffsetBeforeRefresh) > 1) {
-          failRefreshTest("highlight moved")
+          failRefreshTest("highlight moved: before=" + selectedOffsetBeforeRefresh
+            + " after=" + selectedOffset + " index=" + listObject.currentIndex
+            + " rowTop=" + widgetObject.rowVisualTop(listObject.currentIndex)
+            + " contentY=" + listObject.contentY + " originY=" + listObject.originY
+            + " contentHeight=" + listObject.contentHeight + " height=" + listObject.height)
           return
         }
       }
@@ -157,6 +173,54 @@ ShellRoot {
         failRefreshTest("short list unexpectedly scrolls")
         return
       }
+      serviceObject.items = rows(false, "seven")
+    } else if (refreshTestStage === 8) {
+      if (widgetObject.rankedItems.length !== 40) {
+        failRefreshTest("reopen result count")
+        return
+      }
+      widgetObject.open()
+    } else if (refreshTestStage === 9) {
+      widgetObject.focusList(22)
+      listObject.contentY = listObject.originY + widgetObject.rowTopAt(20) + 9
+      if (listObject.currentIndex !== 22 || listObject.contentY <= listObject.originY) {
+        failRefreshTest("reopen setup")
+        return
+      }
+      widgetObject.close()
+      widgetObject.open()
+    } else if (refreshTestStage === 10) {
+      if (listObject.currentIndex !== 0
+          || String(widgetObject.selectedItemUuid) !== String(widgetObject.rankedItems[0].uiUuid)) {
+        failRefreshTest("reopen selection did not reset")
+        return
+      }
+      if (Math.abs(listObject.contentY - listObject.originY) > 1) {
+        failRefreshTest("reopen scroll did not reset")
+        return
+      }
+      if (widgetObject.pointerCursorActive) {
+        failRefreshTest("reopen left pointer selection active")
+        return
+      }
+      var pointerRow = typeof listObject.itemAtIndex === "function"
+        ? listObject.itemAtIndex(2) : null
+      if (!pointerRow) {
+        failRefreshTest("pointer test row not available")
+        return
+      }
+      widgetObject.disarmPointer()
+      widgetObject.selectFromPointer(2, pointerRow, { x: 8, y: 8 })
+      if (listObject.currentIndex !== 0 || widgetObject.pointerCursorActive) {
+        failRefreshTest("stationary pointer changed the highlight")
+        return
+      }
+      widgetObject.selectFromPointer(2, pointerRow, { x: 12, y: 8 })
+      if (listObject.currentIndex !== 2 || !widgetObject.pointerCursorActive) {
+        failRefreshTest("pointer movement did not change the highlight")
+        return
+      }
+      widgetObject.close()
       console.log("EVERYTHING_REFRESH_OK")
       refreshTestTimer.stop()
       Qt.quit()

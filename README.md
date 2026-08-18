@@ -66,8 +66,10 @@ The panel opens in Omarchy's standard keyboard-navigation mode. Press `/` or
 click the search field to edit the query; while editing, every printable key,
 including H, J, K, and L, belongs to the search field. Every space-separated
 query token must fuzzily match a title, breadcrumb/context, provider, type,
-badge, or search term; title matches rank first, followed by context/type, the
-current thing, and recency.
+badge, or search term. Results are grouped by exact kind in a stable order;
+within each group, title matches rank first, followed by context/type, the
+current thing, and recency. Opening beneath a stationary pointer does not move
+the keyboard highlight; pointer selection begins only after actual movement.
 
 | Focus | Keys | Action |
 |---|---|---|
@@ -92,7 +94,9 @@ provider, kind, and native identity. Rebuilding an identical ranked sequence
 does not touch the list UI. When the sequence changes, a surviving highlighted
 thing keeps both its highlight and its visual distance from the top of the
 list; short lists simply keep the highlight. If that thing disappeared, the
-first result is selected. The query and keyboard focus remain unchanged.
+first result is selected. The query and keyboard focus remain unchanged during
+that opening. Closing and reopening clears the query, selects the first result,
+and resets the list to the top.
 
 ## What appears
 
@@ -130,8 +134,8 @@ similar title. Herdr discovery is local-only.
 The Python helper starts only while at least one monitor's panel is open or an
 activation is pending. Hyprland windows arrive first; independent providers
 then stream partial snapshots. Nonintrusive adapters refresh about every two
-seconds while open. Ghostty's modal palette bridge runs once per opening, on
-explicit refresh, and again only to validate an activation.
+seconds while open. Ghostty's modal palette bridge runs once per opening and
+again only to validate an activation; it is excluded from periodic scans.
 
 AT-SPI is enabled at runtime only for that helper lease. Screen-reader mode is
 never enabled, and a guard restores the prior AT-SPI state on shutdown,

@@ -17,30 +17,44 @@ Panel {
     ? root.bar.shell.serviceFor("b.everything") : null
   readonly property color foreground: root.bar ? root.bar.foreground : Color.foreground
   readonly property color dimForeground: Qt.darker(foreground, 1.55)
-  readonly property int rowHeight: Style.space(62)
+  readonly property int rowHeight: Style.space(44)
+  readonly property int sectionHeight: Style.space(24)
   property var rankedItems: []
   property string selectedItemUuid: ""
   property real savedSelectedOffset: 0
   property bool savedListFocus: false
   property bool savedKeyCatcherFocus: false
   property bool savedSearchFocus: false
-  property bool savedRefreshFocus: false
   property bool pendingSelectionSurvived: false
   property bool resultUpdateInProgress: false
   property bool rankUpdateScheduled: false
   property int resultUpdateSerial: 0
+  property bool pointerCursorActive: false
   // A widget may acquire its service lease before its QsWindow/screen exists.
   // Keep the owner key stable and instance-local so an early "unknown" screen
   // can never collide with another monitor or leak a lease after reparenting.
   readonly property string instanceKey: "everything:" + Date.now() + ":"
     + Math.random().toString(36).slice(2)
 
+  function disarmPointer() {
+    pointerCursorActive = false
+    pointerMoveGate.reset()
+  }
+
+  function selectFromPointer(index, item, mouse) {
+    if (!pointerMoveGate.moved(item, mouse)) return
+    setCurrentIndex(index, false)
+    pointerCursorActive = true
+  }
+
   function focusSearch() {
+    disarmPointer()
     searchField.forceActiveFocus()
   }
 
   function focusList(index) {
     if (resultList.count <= 0) return
+    disarmPointer()
     setCurrentIndex(index === undefined ? 0 : index, true)
     resultList.forceActiveFocus()
   }
@@ -79,21 +93,45 @@ Panel {
   function handleEscape() {
     if (searchField.text.length > 0) {
       searchField.text = ""
-      searchField.forceActiveFocus()
+      focusSearch()
     } else {
       root.close()
     }
   }
 
-  function pageSize() {
-    return Math.max(1, Math.floor(resultList.height / rowHeight))
+  function rowTopAt(index) {
+    return Model.sectionedRowTop(rankedItems, index, rowHeight, sectionHeight)
+  }
+
+  function rowVisualTop(index) {
+    if (index >= 0 && typeof resultList.itemAtIndex === "function") {
+      var delegateItem = resultList.itemAtIndex(index)
+      if (delegateItem) return Number(delegateItem.y)
+    }
+    return resultList.originY + rowTopAt(index)
+  }
+
+  function pageDelta(direction) {
+    if (resultList.count <= 0 || direction === 0) return 0
+    var current = Math.max(0, Math.min(resultList.count - 1, resultList.currentIndex))
+    var target = rowVisualTop(current) + (direction > 0 ? resultList.height : -resultList.height)
+    var candidate = current
+    if (direction > 0) {
+      while (candidate + 1 < resultList.count && rowVisualTop(candidate + 1) <= target)
+        candidate++
+      if (candidate === current && candidate + 1 < resultList.count) candidate++
+    } else {
+      while (candidate - 1 >= 0 && rowVisualTop(candidate - 1) >= target)
+        candidate--
+      if (candidate === current && candidate > 0) candidate--
+    }
+    return candidate - current
   }
 
   function rememberFocusState() {
     savedKeyCatcherFocus = keyCatcher.activeFocus
     savedListFocus = resultList.activeFocus || savedKeyCatcherFocus
     savedSearchFocus = searchField.activeFocus
-    savedRefreshFocus = refreshButton.activeFocus
   }
 
   function rememberResultState() {
@@ -103,7 +141,31 @@ Panel {
       selectedItemUuid = Model.itemUuid(rankedItems[current])
     }
     savedSelectedOffset = current >= 0
-      ? resultList.contentY - (resultList.originY + current * rowHeight) : 0
+      ? resultList.contentY - rowVisualTop(current) : 0
+  }
+
+  function applyOpenResultReset() {
+    var index = rankedItems.length > 0 ? 0 : -1
+    resultList.currentIndex = index
+    selectedItemUuid = index >= 0 ? Model.itemUuid(rankedItems[index]) : ""
+    savedSelectedOffset = 0
+    resultList.contentY = resultList.originY
+  }
+
+  function resetResultsForOpen() {
+    // A restore queued during the previous opening must never override the
+    // fresh-open state after the panel becomes visible again.
+    disarmPointer()
+    resultUpdateSerial += 1
+    resultUpdateInProgress = false
+    pendingSelectionSurvived = false
+    applyOpenResultReset()
+    Qt.callLater(function() {
+      if (!root.opened) return
+      if (typeof resultList.forceLayout === "function") resultList.forceLayout()
+      root.applyOpenResultReset()
+      resultList.forceActiveFocus()
+    })
   }
 
   function scheduleRankedItems() {
@@ -122,6 +184,7 @@ Panel {
       everythingService ? everythingService.hiddenIds : {})
     if (Model.sameRankedItems(rankedItems, nextItems)) return
     if (!resultUpdateInProgress) rememberResultState()
+    disarmPointer()
     resultUpdateInProgress = true
     rankedItems = nextItems
     resultUpdateSerial += 1
@@ -154,7 +217,7 @@ Panel {
 
     if (pendingSelectionSurvived && index >= 0
         && resultList.contentHeight > resultList.height + 0.5) {
-      resultList.contentY = Model.anchoredContentY(index, rowHeight, savedSelectedOffset,
+      resultList.contentY = Model.clampContentY(rowVisualTop(index) + savedSelectedOffset,
         resultList.originY, resultList.contentHeight, resultList.height)
     } else if (!pendingSelectionSurvived) {
       resultList.contentY = resultList.originY
@@ -163,7 +226,6 @@ Panel {
     if (savedKeyCatcherFocus) keyCatcher.forceActiveFocus()
     else if (savedListFocus && index >= 0) resultList.forceActiveFocus()
     else if (savedSearchFocus) searchField.forceActiveFocus()
-    else if (savedRefreshFocus) refreshButton.forceActiveFocus()
     resultUpdateInProgress = false
   }
 
@@ -211,19 +273,17 @@ Panel {
     else if (action === "previous") moveSelection(-1)
     else if (action === "first") focusList(0)
     else if (action === "last") focusList(resultList.count - 1)
-    else if (action === "page-next") moveSelection(pageSize())
-    else if (action === "page-previous") moveSelection(-pageSize())
+    else if (action === "page-next") moveSelection(pageDelta(1))
+    else if (action === "page-previous") moveSelection(pageDelta(-1))
     else if (action === "hide") hideAt(resultList.currentIndex)
   }
 
   onOpenedChanged: {
     if (root.opened) {
       searchField.text = ""
+      rebuildRankedItems()
+      resetResultsForOpen()
       if (everythingService) everythingService.acquire(instanceKey)
-      Qt.callLater(function() {
-        if (resultList.count > 0) root.focusList(Math.max(0, resultList.currentIndex))
-        else resultList.forceActiveFocus()
-      })
     } else if (everythingService) {
       everythingService.release(instanceKey)
     }
@@ -245,6 +305,11 @@ Panel {
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
+
+  PointerMoveGate {
+    id: pointerMoveGate
+    referenceItem: resultList
+  }
 
   BarIconButton {
     id: button
@@ -313,48 +378,10 @@ Panel {
         Accessible.role: Accessible.Pane
         Accessible.name: "Everything search and switch panel"
 
-      Row {
-        id: heading
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        height: Style.space(34)
-        spacing: Style.space(8)
-
-        Text {
-          anchors.verticalCenter: parent.verticalCenter
-          width: parent.width - refreshButton.width - parent.spacing
-          text: "Everything"
-          color: root.foreground
-          font.family: Style.font.family
-          font.pixelSize: Style.font.subtitle
-          font.bold: true
-          Accessible.role: Accessible.Heading
-          Accessible.name: text
-        }
-
-        Button {
-          id: refreshButton
-          anchors.verticalCenter: parent.verticalCenter
-          text: "Refresh"
-          iconText: "󰑐"
-          foreground: root.foreground
-          focusable: true
-          enabled: !!root.everythingService && !root.everythingService.scanning
-          onClicked: if (root.everythingService) root.everythingService.refresh()
-          Accessible.role: Accessible.Button
-          Accessible.name: "Refresh all providers"
-          Accessible.focusable: true
-          Accessible.focused: activeFocus
-          Accessible.onPressAction: if (root.everythingService) root.everythingService.refresh()
-        }
-      }
-
       TextField {
         id: searchField
         objectName: "everything-search"
-        anchors.top: heading.bottom
-        anchors.topMargin: Style.space(8)
+        anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
         placeholderText: "Search all things…"
@@ -366,6 +393,7 @@ Panel {
         Accessible.editable: true
         Accessible.focusable: true
         Accessible.focused: activeFocus
+        onActiveFocusChanged: if (activeFocus) root.disarmPointer()
         onTextChanged: root.scheduleRankedItems()
 
         Keys.priority: Keys.BeforeItem
@@ -384,17 +412,18 @@ Panel {
       Text {
         id: statusText
         anchors.top: searchField.bottom
-        anchors.topMargin: Style.space(7)
+        anchors.topMargin: visible ? Style.space(7) : 0
         anchors.left: parent.left
         anchors.right: parent.right
-        height: Style.space(22)
+        visible: text.length > 0
+        height: visible ? Style.space(22) : 0
         text: {
           if (!root.everythingService) return "Starting Everything…"
           if (root.everythingService.statusMessage) return root.everythingService.statusMessage
           if (root.rankedItems.length === 0 && searchField.text) return "No matches"
           if (root.everythingService.warnings.length > 0)
             return "Some providers are unavailable · " + root.everythingService.warnings[root.everythingService.warnings.length - 1]
-          return root.rankedItems.length + (root.rankedItems.length === 1 ? " thing" : " things")
+          return ""
         }
         color: root.everythingService && root.everythingService.warnings.length > 0
           ? Color.urgent : root.dimForeground
@@ -429,6 +458,33 @@ Panel {
         Accessible.focusable: count > 0
         Accessible.focused: activeFocus
 
+        section.property: "kind"
+        section.criteria: ViewSection.FullString
+        section.delegate: Item {
+          id: sectionHeading
+          required property string section
+          objectName: "everything-section-" + section
+          width: ListView.view.width
+          height: root.sectionHeight
+
+          Accessible.role: Accessible.Heading
+          Accessible.name: Model.kindSectionLabel(sectionHeading.section)
+
+          Text {
+            anchors.left: parent.left
+            anchors.leftMargin: Style.space(8)
+            anchors.right: parent.right
+            anchors.rightMargin: Style.space(8)
+            anchors.verticalCenter: parent.verticalCenter
+            text: Model.kindSectionLabel(sectionHeading.section)
+            color: root.dimForeground
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            elide: Text.ElideRight
+          }
+        }
+
         Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) { root.handleSupplementalListKey(event) }
         onCountChanged: {
@@ -447,7 +503,8 @@ Panel {
           required property int index
           width: resultList.width
           height: root.rowHeight
-          readonly property bool highlighted: (resultList.activeFocus || keyCatcher.activeFocus)
+          readonly property bool highlighted: (root.pointerCursorActive
+              || resultList.activeFocus || keyCatcher.activeFocus)
             && resultList.currentIndex === index
           readonly property string crumb: root.breadcrumb(modelData)
 
@@ -466,22 +523,22 @@ Panel {
 
           Rectangle {
             anchors.fill: parent
-            anchors.bottomMargin: Style.space(2)
+            anchors.bottomMargin: Style.space(1)
             radius: Style.cornerRadius
             color: row.highlighted
               ? Style.focusFillFor(root.foreground, Color.accent)
-              : (rowMouse.containsMouse ? Style.hoverFillFor(root.foreground, Color.accent) : "transparent")
+              : "transparent"
             border.width: row.highlighted ? Math.max(1, Style.normalBorderWidth) : 0
             border.color: Color.accent
           }
 
           Column {
             anchors.left: parent.left
-            anchors.leftMargin: Style.space(10)
+            anchors.leftMargin: Style.space(8)
             anchors.right: badgeRow.left
-            anchors.rightMargin: Style.space(8)
+            anchors.rightMargin: Style.space(6)
             anchors.verticalCenter: parent.verticalCenter
-            spacing: Style.space(3)
+            spacing: Style.space(1)
 
             Text {
               width: parent.width
@@ -507,9 +564,9 @@ Panel {
           Row {
             id: badgeRow
             anchors.right: parent.right
-            anchors.rightMargin: Style.space(9)
+            anchors.rightMargin: Style.space(7)
             anchors.verticalCenter: parent.verticalCenter
-            spacing: Style.space(4)
+            spacing: Style.space(3)
 
             Repeater {
               model: [String(row.modelData.provider || "Local"), Model.kindLabel(row.modelData.kind)]
@@ -518,8 +575,8 @@ Panel {
               Rectangle {
                 id: badge
                 required property string modelData
-                width: badgeLabel.implicitWidth + Style.space(10)
-                height: badgeLabel.implicitHeight + Style.space(5)
+                width: badgeLabel.implicitWidth + Style.space(8)
+                height: badgeLabel.implicitHeight + Style.space(3)
                 radius: height / 2
                 color: Style.normalFillFor(root.foreground, Color.accent)
 
@@ -543,9 +600,16 @@ Panel {
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onEntered: root.setCurrentIndex(row.index, false)
+            onEntered: root.selectFromPointer(row.index, row, {
+              x: rowMouse.mouseX,
+              y: rowMouse.mouseY
+            })
+            onPositionChanged: function(mouse) {
+              root.selectFromPointer(row.index, row, mouse)
+            }
             onClicked: {
               root.setCurrentIndex(row.index, false)
+              root.pointerCursorActive = true
               root.activateAt(row.index)
             }
           }

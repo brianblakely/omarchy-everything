@@ -60,6 +60,25 @@ const item = (id, title, context, extra = {}) => ({
 }
 
 {
+  const rows = [
+    item("pane-new", "Pane", "", { kind: "terminal-pane", recency: 20 }),
+    item("window-old", "Window old", "", { kind: "window", recency: 1 }),
+    item("tab", "Tab", "", { kind: "browser-tab", recency: 30 }),
+    item("window-new", "Window new", "", { kind: "window", recency: 10 }),
+    item("buffer", "Buffer", "", { kind: "neovim-buffer", recency: 40 }),
+  ]
+  assert.deepEqual(
+    Array.from(sandbox.rank(rows, "", {}), row => row.id),
+    ["window-new", "window-old", "tab", "pane-new", "buffer"],
+    "results are grouped by kind and ranked within each group",
+  )
+  assert.equal(sandbox.kindSectionLabel("browser-tab"), "Browser tabs")
+  assert.equal(sandbox.kindSectionLabel("neovim-buffer"), "Neovim buffers")
+  assert.equal(sandbox.sectionedRowTop(sandbox.rank(rows, "", {}), 0, 44, 24), 24)
+  assert.equal(sandbox.sectionedRowTop(sandbox.rank(rows, "", {}), 2, 44, 24), 136)
+}
+
+{
   const hidden = sandbox.withHidden({}, "one")
   const reopened = sandbox.rank([item("one", "One", ""), item("two", "Two", "")], "", hidden)
   assert.deepEqual(Array.from(reopened, row => row.id), ["two"], "hidden ids persist across model refreshes")
@@ -121,7 +140,10 @@ const item = (id, title, context, extra = {}) => ({
 
 const qml = fs.readFileSync(path.join(root, "Everything.qml"), "utf8")
 const searchHandler = qml.slice(qml.indexOf("id: searchField"), qml.indexOf("id: statusText"))
-const listHandler = qml.slice(qml.indexOf("id: resultList"), qml.indexOf("delegate: Item"))
+const resultListStart = qml.indexOf("id: resultList")
+const resultDelegateStart = qml.indexOf("\n        delegate: Item", resultListStart)
+const listHandler = qml.slice(resultListStart, resultDelegateStart)
+const statusHandler = qml.slice(qml.indexOf("id: statusText"), resultListStart)
 assert.doesNotMatch(searchHandler, /Key_Backspace|Key_Delete/, "search owns editing keys")
 assert.match(qml, /focusTarget:\s*resultList/,
   "the list owns focus while the shell key catcher remains its navigation wrapper")
@@ -147,8 +169,38 @@ assert.match(qml, /sameRankedItems\(rankedItems, nextItems\)[\s\S]*return/,
   "an unchanged ranked list is not assigned to the UI")
 assert.match(qml, /indexAfterRefresh\(rankedItems, selectedItemUuid/,
   "selection is restored by deterministic UI UUID")
-assert.match(qml, /contentHeight > resultList\.height[\s\S]*anchoredContentY/,
-  "scroll offset is restored only when the list can scroll")
+assert.match(qml, /function rowVisualTop[\s\S]*itemAtIndex[\s\S]*delegateItem\.y/,
+  "scroll restoration reads the selected delegate's live geometry")
+assert.match(qml, /contentHeight > resultList\.height[\s\S]*clampContentY\(rowVisualTop\(index\) \+ savedSelectedOffset/,
+  "scroll offset is restored only when the sectioned list can scroll")
+assert.match(qml, /function resetResultsForOpen\(\)[\s\S]*resultUpdateSerial \+= 1[\s\S]*applyOpenResultReset\(\)/,
+  "opening invalidates stale refresh restores and resets the selected thing")
+assert.match(qml, /function applyOpenResultReset\(\)[\s\S]*currentIndex = index[\s\S]*contentY = resultList\.originY/,
+  "opening selects the first thing and resets the list scroll")
+assert.match(qml, /onOpenedChanged:[\s\S]*searchField\.text = ""[\s\S]*rebuildRankedItems\(\)[\s\S]*resetResultsForOpen\(\)/,
+  "every panel opening resets against the unfiltered ranked list")
+assert.match(qml, /PointerMoveGate\s*\{[\s\S]*?referenceItem:\s*resultList[\s\S]*?\}/,
+  "row pointer selection uses the shell movement gate")
+assert.match(qml, /function selectFromPointer[\s\S]*if \(!pointerMoveGate\.moved\(item, mouse\)\) return[\s\S]*setCurrentIndex\(index, false\)/,
+  "pointer selection changes only after measured movement")
+assert.match(qml, /function disarmPointer[\s\S]*pointerCursorActive = false[\s\S]*pointerMoveGate\.reset\(\)/,
+  "keyboard, opening, and list mutations can disarm pointer selection")
+assert.match(qml, /onPositionChanged:[\s\S]*selectFromPointer\(row\.index, row, mouse\)/,
+  "real row pointer movement is routed through the movement gate")
+assert.doesNotMatch(qml, /rowMouse\.containsMouse/,
+  "row styling never treats a stationary pointer as movement")
+assert.doesNotMatch(qml, /id:\s*heading\b/,
+  "the panel does not render a redundant title row")
+assert.match(qml, /readonly property int rowHeight:\s*Style\.space\(44\)/,
+  "result rows use the compact two-line layout")
+assert.match(qml, /section\.property:\s*"kind"[\s\S]*section\.delegate:[\s\S]*Accessible\.Heading/,
+  "the list renders accessible kind headings")
+assert.doesNotMatch(qml, /refreshButton|Refresh all providers|everythingService\.refresh\(\)/,
+  "automatic discovery does not expose a redundant manual refresh control")
+assert.match(statusHandler, /visible:\s*text\.length > 0[\s\S]*height:\s*visible \? Style\.space\(22\) : 0/,
+  "the status row collapses when it has no actionable message")
+assert.doesNotMatch(statusHandler, /rankedItems\.length \+|\? " thing" : " things"/,
+  "the panel does not display a result count")
 assert.doesNotMatch(qml, /centerOnBar\s*:/, "panel uses the shell's default icon anchoring")
 assert.doesNotMatch(qml, /function\s+(?:open|close|togglePanel)\s*\(/,
   "panel uses the inherited shell lifecycle")
@@ -157,5 +209,7 @@ assert.match(qml, /onPressed:[^\n]*root\.toggle\(\)/, "bar button uses the inher
 const serviceQml = fs.readFileSync(path.join(root, "Service.qml"), "utf8")
 assert.match(serviceQml, /reconcileItems\(items, incoming\)/, "token-only snapshots keep the visible model stable")
 assert.match(serviceQml, /requestScan\(false, true\)/, "background refreshes do not flash status text")
+assert.doesNotMatch(serviceQml, /function refresh\s*\(/,
+  "the service has no unused manual refresh entry point")
 
 console.log("model.test.js: all tests passed")

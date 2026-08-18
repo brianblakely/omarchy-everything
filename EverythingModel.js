@@ -75,6 +75,47 @@ function kindLabel(kind) {
   return labels[String(kind)] || String(kind || "Thing")
 }
 
+function kindSectionLabel(kind) {
+  var labels = {
+    "window": "Windows",
+    "browser-tab": "Browser tabs",
+    "app-tab": "Application tabs",
+    "terminal-tab": "Terminal tabs",
+    "terminal-pane": "Terminal panes",
+    "tmux-session": "tmux sessions",
+    "tmux-window": "tmux windows",
+    "tmux-pane": "tmux panes",
+    "herdr-session": "Herdr sessions",
+    "herdr-workspace": "Herdr workspaces",
+    "herdr-tab": "Herdr tabs",
+    "herdr-pane": "Herdr panes",
+    "herdr-agent": "Herdr agents",
+    "neovim-buffer": "Neovim buffers"
+  }
+  return labels[String(kind)] || "Other things"
+}
+
+function kindOrder(kind) {
+  var order = {
+    "window": 0,
+    "browser-tab": 1,
+    "app-tab": 2,
+    "terminal-tab": 3,
+    "terminal-pane": 4,
+    "tmux-session": 5,
+    "tmux-window": 6,
+    "tmux-pane": 7,
+    "herdr-session": 8,
+    "herdr-workspace": 9,
+    "herdr-tab": 10,
+    "herdr-pane": 11,
+    "herdr-agent": 12,
+    "neovim-buffer": 13
+  }
+  var value = order[String(kind)]
+  return value === undefined ? 1000 : value
+}
+
 function rankedEntry(item, tokens, sourceIndex) {
   var title = normalized(item.title)
   var context = normalized(item.context)
@@ -133,6 +174,8 @@ function rank(items, query, hiddenIds) {
     if (entry) ranked.push(entry)
   }
   ranked.sort(function(a, b) {
+    var groupOrder = kindOrder(a.item.kind) - kindOrder(b.item.kind)
+    if (groupOrder !== 0) return groupOrder
     var fields = ["titleHits", "contextHits", "typeHits", "quality", "active", "recency"]
     for (var field = 0; field < fields.length; field++) {
       var name = fields[field]
@@ -167,6 +210,21 @@ function indexAfterRefresh(items, selectedUuid) {
   var exact = indexOfUuid(source, selectedUuid)
   if (exact >= 0) return exact
   return 0
+}
+
+function sectionedRowTop(items, index, rowHeight, sectionHeight) {
+  var source = Array.isArray(items) ? items : []
+  if (source.length === 0 || index < 0) return 0
+  var bounded = Math.min(source.length - 1, Math.floor(Number(index || 0)))
+  var sections = 0
+  var previous = ""
+  for (var i = 0; i <= bounded; i++) {
+    var current = String(source[i] && source[i].kind || "")
+    if (i === 0 || current !== previous) sections++
+    previous = current
+  }
+  return bounded * Math.max(1, Number(rowHeight || 1))
+    + sections * Math.max(0, Number(sectionHeight || 0))
 }
 
 function clampContentY(value, originY, contentHeight, viewHeight) {

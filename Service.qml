@@ -81,10 +81,6 @@ Item {
     })
   }
 
-  function refresh() {
-    requestScan(true, false)
-  }
-
   function activate(item) {
     if (!item || !item.id) return
     var token = String(activationTokens[String(item.id)] || item.activationToken || "")

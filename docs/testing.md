@@ -11,10 +11,12 @@ tests/all.sh
 The suite performs:
 
 - Python compilation and 30+ unit/protocol tests;
-- fuzzy token ranking, title/context priority, active/recency order, duplicate
-  identity handling, token authentication, and hidden-result persistence;
+- fuzzy token ranking, stable kind grouping, title/context priority within a
+  group, active/recency order, duplicate identity handling, token
+  authentication, and hidden-result persistence;
 - every documented keyboard alias, focus-sensitive Delete/Backspace ownership,
-  safe selection after removal, and close-before-activation ordering;
+  safe selection after removal, stationary-pointer filtering, deliberate
+  pointer selection, and close-before-activation ordering;
 - argv injection rejection, command timeout/kill behavior, JSON-lines request
   correlation, malformed-request recovery, and stale-token rejection;
 - partial provider streaming, provider failure isolation, stale-row removal,
@@ -119,16 +121,25 @@ single refresh followed by a visible stale notification.
 
 ### Lifecycle and recovery
 
-- Leave the panel open through several two-second polls. Confirm socket/CLI
-  updates merge without Ghostty's modal reopening.
+- Open the panel and confirm Ghostty scans once and closes its palette. Leave
+  the panel open through several two-second polls and confirm socket/CLI
+  updates merge without the modal reopening.
 - With a middle row highlighted, refresh an unchanged result set and confirm
   the list model is not replaced. Then reorder or add rows and confirm the
   same UUID stays highlighted at the same visual offset. Remove that row and
   confirm selection returns to the first result. Repeat with a short list that
   cannot scroll and confirm only the highlight is preserved.
-- Explicitly refresh and confirm Ghostty scans once, then closes its palette.
+- Populate several kinds at once. Confirm each exact kind has one accessible
+  heading, groups remain in stable order, and ranking is preserved within each
+  group. Refresh while the selected row crosses a heading and confirm its
+  visual offset is retained.
+- Scroll to and highlight a middle result, close the panel, and open it again.
+  Confirm the first result is highlighted and the list is at its scroll origin.
+- Open the panel while the pointer is stationary over a result. Confirm that
+  the pointer does not steal the keyboard highlight; move it deliberately and
+  confirm the highlight follows exactly one row. Repeat across a list refresh.
 - Kill the helper during a scan and during activation. Confirm panel warnings,
   bounded restart behavior, no persistent worker after close, and restoration
   of the prior AT-SPI state.
-- Hide rows, close/reopen the panel, and refresh: they remain hidden. Reload
-  `b.everything` or `omarchy-shell`: they return.
+- Hide rows, close/reopen the panel, and wait for an automatic refresh: they
+  remain hidden. Reload `b.everything` or `omarchy-shell`: they return.

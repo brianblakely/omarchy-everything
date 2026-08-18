@@ -51,7 +51,7 @@ Ghostty 1.3.1; it is not presented as a public Ghostty IPC API.
 [Ghostty's pinned 1.3.1 source](https://github.com/ghostty-org/ghostty/tree/v1.3.1/src)
 is the compatibility boundary.
 
-On panel open or explicit refresh, Everything:
+On each panel opening, Everything:
 
 1. Verifies the running class and exact `ghostty +version` output.
 2. Capability-probes `toggle_command_palette` with `ghostty +list-actions`
