@@ -182,7 +182,7 @@ Panel {
     onPressed: function(_buttonCode) { root.togglePanel() }
 
     Accessible.role: Accessible.Button
-    Accessible.name: "Open Everything viewport switcher"
+    Accessible.name: "Open Everything thing switcher"
     Accessible.description: "Search windows, tabs, panes, sessions, agents, and buffers"
     Accessible.focusable: true
     Accessible.focused: activeFocus
@@ -214,7 +214,7 @@ Panel {
       id: content
       anchors.fill: parent
       Accessible.role: Accessible.Pane
-      Accessible.name: "Everything viewport switcher"
+      Accessible.name: "Everything thing switcher"
 
       Row {
         id: heading
@@ -246,7 +246,7 @@ Panel {
           enabled: !!root.everythingService && !root.everythingService.scanning
           onClicked: if (root.everythingService) root.everythingService.refresh()
           Accessible.role: Accessible.Button
-          Accessible.name: "Refresh all viewport providers"
+          Accessible.name: "Refresh all thing providers"
           Accessible.focusable: true
           Accessible.focused: activeFocus
           Accessible.onPressAction: if (root.everythingService) root.everythingService.refresh()
@@ -259,11 +259,11 @@ Panel {
         anchors.topMargin: Style.space(8)
         anchors.left: parent.left
         anchors.right: parent.right
-        placeholderText: "Search every viewport…"
+        placeholderText: "Search every thing…"
         foreground: root.foreground
         activeFocusOnTab: true
         Accessible.role: Accessible.EditableText
-        Accessible.name: "Search viewports"
+        Accessible.name: "Search things"
         Accessible.description: "Type to fuzzily filter the result list"
         Accessible.editable: true
         Accessible.focusable: true
@@ -295,7 +295,7 @@ Panel {
           if (root.rankedItems.length === 0 && searchField.text) return "No matches"
           if (root.everythingService.warnings.length > 0)
             return "Some providers are unavailable · " + root.everythingService.warnings[root.everythingService.warnings.length - 1]
-          return root.rankedItems.length + (root.rankedItems.length === 1 ? " viewport" : " viewports")
+          return root.rankedItems.length + (root.rankedItems.length === 1 ? " thing" : " things")
         }
         color: root.everythingService && root.everythingService.warnings.length > 0
           ? Color.urgent : root.dimForeground
@@ -324,7 +324,7 @@ Panel {
         keyNavigationEnabled: false
         highlightMoveDuration: 80
         Accessible.role: Accessible.List
-        Accessible.name: "Ranked viewport results"
+        Accessible.name: "Ranked thing results"
         Accessible.description: "Use arrow keys to select and Enter to switch"
         Accessible.focusable: count > 0
         Accessible.focused: activeFocus
@@ -352,7 +352,7 @@ Panel {
           Accessible.name: String(modelData.title || "Untitled")
           Accessible.description: [String(modelData.provider || ""), Model.kindLabel(modelData.kind)]
             .concat(Array.isArray(modelData.badges) ? modelData.badges : [])
-            .concat(modelData.active === true ? ["Current viewport"] : [])
+            .concat(modelData.active === true ? ["Current thing"] : [])
             .concat(crumb ? [crumb] : [])
             .filter(function(value) { return value.length > 0 }).join(", ")
           Accessible.selectable: true
