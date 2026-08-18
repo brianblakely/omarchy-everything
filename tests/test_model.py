@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import uuid
 
 from everything.model import (
     SnapshotRegistry,
@@ -10,6 +11,7 @@ from everything.model import (
     dedupe_things,
     identity_component,
     stable_id,
+    thing_ui_uuid,
 )
 
 
@@ -47,6 +49,18 @@ class IdentityTests(unittest.TestCase):
         second.badges = ["Two"]
         self.assertEqual(dedupe_things([first, second])[0].badges, ["One", "Two"])
 
+    def test_ui_uuid_is_deterministic_and_trait_scoped(self) -> None:
+        value = thing_ui_uuid("Test", "window", "test:native-1")
+        self.assertEqual(value, thing_ui_uuid("Test", "window", "test:native-1"))
+        self.assertNotEqual(value, thing_ui_uuid("Test", "window", "test:native-2"))
+        self.assertNotEqual(value, thing_ui_uuid("Test", "browser-tab", "test:native-1"))
+        self.assertEqual(uuid.UUID(value).version, 5)
+
+    def test_public_item_contains_its_ui_uuid(self) -> None:
+        row = thing("test:native-1")
+        public = row.public("opaque")
+        self.assertEqual(public["uiUuid"], thing_ui_uuid(row.provider, row.kind, row.id))
+
 
 class TokenTests(unittest.TestCase):
     def test_tokens_are_authenticated_and_process_local(self) -> None:
@@ -73,4 +87,3 @@ class TokenTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

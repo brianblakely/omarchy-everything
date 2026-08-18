@@ -12,6 +12,7 @@ vm.runInContext(source, sandbox, { filename: "EverythingModel.js" })
 
 const item = (id, title, context, extra = {}) => ({
   id,
+  uiUuid: `test-uuid:${id}`,
   kind: "window",
   provider: "Test",
   title,
@@ -62,16 +63,16 @@ const item = (id, title, context, extra = {}) => ({
   const hidden = sandbox.withHidden({}, "one")
   const reopened = sandbox.rank([item("one", "One", ""), item("two", "Two", "")], "", hidden)
   assert.deepEqual(Array.from(reopened, row => row.id), ["two"], "hidden ids persist across model refreshes")
-  assert.equal(sandbox.nextIndexAfterRemoval(2, 3), 1)
-  assert.equal(sandbox.nextIndexAfterRemoval(0, 1), -1)
 }
 
 {
   const rows = [item("one", "One", ""), item("two", "Two", ""), item("three", "Three", "")]
-  assert.equal(sandbox.indexOfId(rows, "two"), 1)
-  assert.equal(sandbox.indexAfterRefresh(rows, "two", 0), 1, "refresh follows the stable thing id")
-  assert.equal(sandbox.indexAfterRefresh(rows, "closed", 2), 2, "a closed thing keeps the nearest index")
-  assert.equal(sandbox.indexAfterRefresh([], "two", 1), -1)
+  assert.equal(sandbox.indexOfUuid(rows, "test-uuid:two"), 1)
+  assert.equal(sandbox.indexAfterRefresh(rows, "test-uuid:two"), 1,
+    "refresh follows the deterministic UI UUID")
+  assert.equal(sandbox.indexAfterRefresh(rows, "test-uuid:closed"), 0,
+    "a removed thing selects the first row")
+  assert.equal(sandbox.indexAfterRefresh([], "test-uuid:two"), -1)
   assert.equal(sandbox.clampContentY(900, 0, 1000, 400), 600)
   assert.equal(sandbox.anchoredContentY(5, 60, 7, 0, 1000, 400), 307)
 }
@@ -95,13 +96,25 @@ const item = (id, title, context, extra = {}) => ({
   ])
   assert.equal(changed.changed, true, "a visible field change publishes a new model")
   assert.equal(changed.items[0].title, "Renamed")
+
+  const sameRank = [
+    item("one", "One", "", { activationToken: "another-one" }),
+    item("two", "Two", "", { activationToken: "another-two" }),
+  ]
+  assert.equal(sandbox.sameRankedItems(current, sameRank), true,
+    "an identical ranked sequence does not update the UI")
+  assert.equal(sandbox.sameRankedItems(current, sameRank.slice().reverse()), false,
+    "a reordered ranked sequence updates the UI")
+  assert.equal(sandbox.sameRankedItems(current, changed.items), false,
+    "changed rendered traits update the UI")
 }
 
 const qml = fs.readFileSync(path.join(root, "Everything.qml"), "utf8")
 const searchHandler = qml.slice(qml.indexOf("id: searchField"), qml.indexOf("id: statusText"))
 const listHandler = qml.slice(qml.indexOf("id: resultList"), qml.indexOf("delegate: Item"))
 assert.doesNotMatch(searchHandler, /Key_Backspace|Key_Delete/, "search owns editing keys")
-assert.match(qml, /focusTarget:\s*keyCatcher/, "the shell key catcher receives initial panel focus")
+assert.match(qml, /focusTarget:\s*resultList/,
+  "the list owns focus while the shell key catcher remains its navigation wrapper")
 assert.match(qml, /PanelKeyCatcher\s*\{[\s\S]*blocked:\s*searchField\.activeFocus/,
   "the standard shell key catcher yields only while search is being edited")
 assert.match(qml, /onMoveRequested:[\s\S]*dy !== 0 \? dy : dx[\s\S]*moveSelection\(delta\)/,
@@ -118,8 +131,14 @@ assert.doesNotMatch(listHandler, /Key_Down|Key_Up|Key_Left|Key_Right|Key_Return|
   "the list does not override standard shell navigation")
 assert.match(qml, /Key_Backspace[\s\S]*Key_Delete[\s\S]*action = "hide"/, "Backspace and Delete hide list rows")
 assert.match(qml, /root\.close\(\)[\s\S]*Qt\.callLater[\s\S]*everythingService\.activate/, "panel closes before activation")
-assert.match(qml, /onItemsChanged\(\)[\s\S]*scheduleRankedItems\(true\)/, "provider refresh preserves UI state")
-assert.match(qml, /indexAfterRefresh\(rankedItems, selectedThingId/, "selection is restored by stable thing id")
+assert.match(qml, /onItemsChanged\(\)[\s\S]*scheduleRankedItems\(\)/,
+  "provider refresh rebuilds through identity-aware reconciliation")
+assert.match(qml, /sameRankedItems\(rankedItems, nextItems\)[\s\S]*return/,
+  "an unchanged ranked list is not assigned to the UI")
+assert.match(qml, /indexAfterRefresh\(rankedItems, selectedItemUuid/,
+  "selection is restored by deterministic UI UUID")
+assert.match(qml, /contentHeight > resultList\.height[\s\S]*anchoredContentY/,
+  "scroll offset is restored only when the list can scroll")
 assert.doesNotMatch(qml, /centerOnBar\s*:/, "panel uses the shell's default icon anchoring")
 assert.doesNotMatch(qml, /function\s+(?:open|close|togglePanel)\s*\(/,
   "panel uses the inherited shell lifecycle")

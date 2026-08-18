@@ -12,9 +12,9 @@ ShellRoot {
   property var keyCatcherObject: null
   property int refreshTestStage: 0
   property string selectedBeforeRefresh: ""
-  property string anchorBeforeRefresh: ""
+  property string shortListSelection: ""
   property real selectedOffsetBeforeRefresh: 0
-  property bool listFocusedBeforeRefresh: false
+  property var rankedBeforeRefresh: null
 
   function manifestData(source) {
     return {
@@ -43,11 +43,12 @@ ShellRoot {
     return null
   }
 
-  function rows(reverseOrder) {
+  function rows(reverseOrder, tokenGeneration) {
     var out = []
     for (var i = 0; i < 40; i++) {
       out.push({
         id: "test:" + String(i).padStart(2, "0"),
+        uiUuid: "00000000-0000-5000-8000-" + String(i).padStart(12, "0"),
         kind: "window",
         provider: "Test",
         title: "Shared thing",
@@ -57,7 +58,7 @@ ShellRoot {
         badges: [],
         active: false,
         recency: reverseOrder ? i : 100 - i,
-        activationToken: "token-" + (reverseOrder ? "new-" : "old-") + i
+        activationToken: "token-" + String(tokenGeneration || "one") + "-" + i
       })
     }
     return out
@@ -83,7 +84,7 @@ ShellRoot {
         failRefreshTest("controls not found")
         return
       }
-      serviceObject.items = rows(false)
+      serviceObject.items = rows(false, "one")
     } else if (refreshTestStage === 1) {
       searchObject.text = "shared"
     } else if (refreshTestStage === 2) {
@@ -104,12 +105,16 @@ ShellRoot {
       }
       listObject.contentY = listObject.originY + widgetObject.rowHeight * 14 + 7
       selectedBeforeRefresh = resultId(listObject.currentIndex)
-      var top = Math.floor((listObject.contentY - listObject.originY) / widgetObject.rowHeight)
-      anchorBeforeRefresh = resultId(top)
       selectedOffsetBeforeRefresh = listObject.currentIndex * widgetObject.rowHeight - listObject.contentY
-      listFocusedBeforeRefresh = listObject.activeFocus
-      serviceObject.items = rows(true)
+      rankedBeforeRefresh = widgetObject.rankedItems
+      serviceObject.items = rows(false, "two")
     } else if (refreshTestStage === 3) {
+      if (widgetObject.rankedItems !== rankedBeforeRefresh) {
+        failRefreshTest("unchanged list was replaced")
+        return
+      }
+      serviceObject.items = rows(true, "three")
+    } else if (refreshTestStage === 4) {
       if (searchObject.text !== "shared") {
         failRefreshTest("query changed")
         return
@@ -118,18 +123,38 @@ ShellRoot {
         failRefreshTest("selection changed")
         return
       }
-      if (listFocusedBeforeRefresh) {
+      if (listObject.contentHeight > listObject.height + 0.5) {
         var selectedOffset = listObject.currentIndex * widgetObject.rowHeight - listObject.contentY
         if (Math.abs(selectedOffset - selectedOffsetBeforeRefresh) > 1) {
           failRefreshTest("highlight moved")
           return
         }
-      } else {
-        var topAfter = Math.floor((listObject.contentY - listObject.originY) / widgetObject.rowHeight)
-        if (resultId(topAfter) !== anchorBeforeRefresh) {
-          failRefreshTest("scroll anchor changed")
-          return
-        }
+      }
+      serviceObject.items = rows(true, "four").filter(function(row) {
+        return row.id !== selectedBeforeRefresh
+      })
+    } else if (refreshTestStage === 5) {
+      if (listObject.currentIndex !== 0) {
+        failRefreshTest("removed selection did not return to the first row")
+        return
+      }
+      serviceObject.items = rows(false, "five").slice(0, 3)
+    } else if (refreshTestStage === 6) {
+      if (widgetObject.rankedItems.length !== 3) {
+        failRefreshTest("short list result count")
+        return
+      }
+      widgetObject.focusList(0)
+      shortListSelection = resultId(listObject.currentIndex)
+      serviceObject.items = rows(true, "six").slice(0, 3)
+    } else if (refreshTestStage === 7) {
+      if (resultId(listObject.currentIndex) !== shortListSelection) {
+        failRefreshTest("short list selection changed")
+        return
+      }
+      if (listObject.contentHeight > listObject.height + 0.5) {
+        failRefreshTest("short list unexpectedly scrolls")
+        return
       }
       console.log("EVERYTHING_REFRESH_OK")
       refreshTestTimer.stop()

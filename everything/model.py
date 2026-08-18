@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import secrets
+import uuid
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Iterable
@@ -30,6 +31,8 @@ SUPPORTED_KINDS = frozenset(
     }
 )
 
+UI_ITEM_NAMESPACE = uuid.UUID("40ad37f5-b488-50bc-b3ad-d310967b3fd2")
+
 
 def identity_component(value: Any) -> str:
     """Encode one native identity component without permitting ambiguity."""
@@ -45,6 +48,17 @@ def stable_id(provider: str, *parts: Any) -> str:
     if not parts:
         raise ValueError("an identity needs at least one native component")
     return provider + ":" + "/".join(identity_component(part) for part in parts)
+
+
+def thing_ui_uuid(provider: str, kind: str, identifier: str) -> str:
+    """Create the stable UUID used only for list reconciliation in QML."""
+
+    traits = json.dumps(
+        [str(provider), str(kind), str(identifier)],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return str(uuid.uuid5(UI_ITEM_NAMESPACE, traits))
 
 
 @dataclass(slots=True)
@@ -78,6 +92,7 @@ class Thing:
     def public(self, activation_token: str) -> dict[str, Any]:
         return {
             "id": self.id,
+            "uiUuid": thing_ui_uuid(self.provider, self.kind, self.id),
             "kind": self.kind,
             "provider": self.provider,
             "title": self.title,

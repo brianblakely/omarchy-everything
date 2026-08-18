@@ -77,6 +77,7 @@ Every public item contains:
 | Field | Meaning |
 |---|---|
 | `id` | Stable provider/native identity, including process birth or socket identity where reuse is possible |
+| `uiUuid` | Deterministic UUIDv5 derived from provider, kind, and native identity for UI reconciliation |
 | `kind` | One supported actionable thing kind |
 | `provider` | Human-readable provider badge |
 | `title` | Primary search and display title |
@@ -97,6 +98,10 @@ Activation bodies never enter QML as a separate field. They are authenticated
 inside the token with a helper-process secret. Provider generations make old
 tokens stale; activation performs one exact-ID refresh and retry before
 returning an error.
+
+`uiUuid` is not an activation credential and carries no mutable runtime state.
+The panel compares the final ordered UUID and presentation-trait sequence
+before replacing its list model. An identical sequence is a no-op.
 
 ## Service lease
 

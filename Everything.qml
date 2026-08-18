@@ -19,20 +19,15 @@ Panel {
   readonly property color dimForeground: Qt.darker(foreground, 1.55)
   readonly property int rowHeight: Style.space(62)
   property var rankedItems: []
-  property string selectedThingId: ""
-  property int selectedIndexHint: 0
-  property string savedAnchorThingId: ""
-  property real savedAnchorOffset: 0
+  property string selectedItemUuid: ""
   property real savedSelectedOffset: 0
-  property real savedContentY: 0
   property bool savedListFocus: false
   property bool savedKeyCatcherFocus: false
   property bool savedSearchFocus: false
   property bool savedRefreshFocus: false
-  property bool keepRefreshPosition: false
+  property bool pendingSelectionSurvived: false
   property bool resultUpdateInProgress: false
   property bool rankUpdateScheduled: false
-  property bool scheduledUpdateKeepsPosition: true
   property int resultUpdateSerial: 0
   // A widget may acquire its service lease before its QsWindow/screen exists.
   // Keep the owner key stable and instance-local so an early "unknown" screen
@@ -53,13 +48,12 @@ Panel {
   function setCurrentIndex(index, reveal) {
     if (resultList.count <= 0 || rankedItems.length <= 0) {
       resultList.currentIndex = -1
-      selectedThingId = ""
+      selectedItemUuid = ""
       return
     }
     var bounded = Math.max(0, Math.min(Number(index || 0), resultList.count - 1))
     resultList.currentIndex = bounded
-    selectedIndexHint = bounded
-    selectedThingId = String(rankedItems[bounded].id || "")
+    selectedItemUuid = Model.itemUuid(rankedItems[bounded])
     if (reveal === true) resultList.positionViewAtIndex(bounded, ListView.Contain)
   }
 
@@ -79,12 +73,7 @@ Panel {
 
   function hideAt(index) {
     if (index < 0 || index >= rankedItems.length || !everythingService) return
-    var nextIndex = Model.nextIndexAfterRemoval(index, rankedItems.length)
     everythingService.hideItem(rankedItems[index].id)
-    Qt.callLater(function() {
-      if (nextIndex >= 0) root.focusList(nextIndex)
-      else searchField.forceActiveFocus()
-    })
   }
 
   function handleEscape() {
@@ -111,88 +100,63 @@ Panel {
     rememberFocusState()
     var current = resultList.currentIndex
     if (current >= 0 && current < rankedItems.length) {
-      selectedIndexHint = current
-      selectedThingId = String(rankedItems[current].id || selectedThingId)
+      selectedItemUuid = Model.itemUuid(rankedItems[current])
     }
-    savedContentY = resultList.contentY
     savedSelectedOffset = current >= 0
       ? resultList.contentY - (resultList.originY + current * rowHeight) : 0
-    var top = Math.max(0, Math.min(rankedItems.length - 1,
-      Math.floor((resultList.contentY - resultList.originY) / rowHeight)))
-    savedAnchorThingId = rankedItems.length > 0 ? String(rankedItems[top].id || "") : ""
-    savedAnchorOffset = resultList.contentY - (resultList.originY + top * rowHeight)
   }
 
-  function prepareFreshResultState() {
-    rememberFocusState()
-    selectedThingId = ""
-    selectedIndexHint = 0
-    savedAnchorThingId = ""
-    savedAnchorOffset = 0
-    savedSelectedOffset = 0
-    savedContentY = resultList.originY
-  }
-
-  function scheduleRankedItems(keepPosition) {
-    if (!rankUpdateScheduled) {
-      rankUpdateScheduled = true
-      scheduledUpdateKeepsPosition = keepPosition === true
-      Qt.callLater(function() {
-        var preserve = root.scheduledUpdateKeepsPosition
-        root.rankUpdateScheduled = false
-        root.rebuildRankedItems(preserve)
-      })
-    } else if (keepPosition !== true) {
-      // Query edits take precedence over a refresh queued in the same turn.
-      scheduledUpdateKeepsPosition = false
-    }
-  }
-
-  function rebuildRankedItems(keepPosition) {
-    if (!resultUpdateInProgress) {
-      keepRefreshPosition = keepPosition === true
-      if (keepRefreshPosition) rememberResultState()
-      else prepareFreshResultState()
-    } else if (keepPosition !== true) {
-      // A query edit that lands during a pending restore intentionally starts
-      // the filtered result set at its first row.
-      keepRefreshPosition = false
-      prepareFreshResultState()
-    }
-
-    resultUpdateInProgress = true
-    rankedItems = Model.rank(
-      everythingService ? everythingService.items : [],
-      searchField.text,
-      everythingService ? everythingService.hiddenIds : {})
-    resultUpdateSerial += 1
-    var serial = resultUpdateSerial
+  function scheduleRankedItems() {
+    if (rankUpdateScheduled) return
+    rankUpdateScheduled = true
     Qt.callLater(function() {
-      if (serial === root.resultUpdateSerial) root.restoreResultState()
+      root.rankUpdateScheduled = false
+      root.rebuildRankedItems()
     })
   }
 
-  function restoreResultState() {
-    var index = keepRefreshPosition
-      ? Model.indexAfterRefresh(rankedItems, selectedThingId, selectedIndexHint)
-      : (rankedItems.length > 0 ? 0 : -1)
-    resultList.currentIndex = index
-    selectedIndexHint = Math.max(0, index)
-    selectedThingId = index >= 0 ? String(rankedItems[index].id || "") : ""
+  function rebuildRankedItems() {
+    var nextItems = Model.rank(
+      everythingService ? everythingService.items : [],
+      searchField.text,
+      everythingService ? everythingService.hiddenIds : {})
+    if (Model.sameRankedItems(rankedItems, nextItems)) return
+    if (!resultUpdateInProgress) rememberResultState()
+    resultUpdateInProgress = true
+    rankedItems = nextItems
+    resultUpdateSerial += 1
+    var serial = resultUpdateSerial
+    Qt.callLater(function() {
+      if (serial === root.resultUpdateSerial) root.restoreResultSelection(serial)
+    })
+  }
 
-    if (keepRefreshPosition && index >= 0) {
-      var anchorIndex = Model.indexOfId(rankedItems, savedAnchorThingId)
-      var desired = savedContentY
-      if (savedListFocus && Model.indexOfId(rankedItems, selectedThingId) >= 0) {
-        desired = Model.anchoredContentY(index, rowHeight, savedSelectedOffset,
-          resultList.originY, resultList.contentHeight, resultList.height)
-      } else if (anchorIndex >= 0) {
-        desired = Model.anchoredContentY(anchorIndex, rowHeight, savedAnchorOffset,
-          resultList.originY, resultList.contentHeight, resultList.height)
-      }
-      resultList.contentY = Model.clampContentY(desired, resultList.originY,
-        resultList.contentHeight, resultList.height)
-    } else {
+  function restoreResultSelection(serial) {
+    if (serial !== resultUpdateSerial) return
+    if (typeof resultList.forceLayout === "function") resultList.forceLayout()
+    pendingSelectionSurvived = Model.indexOfUuid(rankedItems, selectedItemUuid) >= 0
+    var index = Model.indexAfterRefresh(rankedItems, selectedItemUuid)
+    resultList.currentIndex = index
+    selectedItemUuid = index >= 0 ? Model.itemUuid(rankedItems[index]) : ""
+    if (!pendingSelectionSurvived) resultList.contentY = resultList.originY
+    Qt.callLater(function() {
+      if (serial === root.resultUpdateSerial) root.finishResultRestore(serial)
+    })
+  }
+
+  function finishResultRestore(serial) {
+    if (serial !== resultUpdateSerial) return
+    if (typeof resultList.forceLayout === "function") resultList.forceLayout()
+    var index = Model.indexOfUuid(rankedItems, selectedItemUuid)
+    if (index < 0) index = rankedItems.length > 0 ? 0 : -1
+    resultList.currentIndex = index
+    selectedItemUuid = index >= 0 ? Model.itemUuid(rankedItems[index]) : ""
+
+    if (pendingSelectionSurvived && index >= 0
+        && resultList.contentHeight > resultList.height + 0.5) {
+      resultList.contentY = Model.anchoredContentY(index, rowHeight, savedSelectedOffset,
+        resultList.originY, resultList.contentHeight, resultList.height)
+    } else if (!pendingSelectionSurvived) {
       resultList.contentY = resultList.originY
     }
 
@@ -256,7 +220,10 @@ Panel {
     if (root.opened) {
       searchField.text = ""
       if (everythingService) everythingService.acquire(instanceKey)
-      Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+      Qt.callLater(function() {
+        if (resultList.count > 0) root.focusList(Math.max(0, resultList.currentIndex))
+        else resultList.forceActiveFocus()
+      })
     } else if (everythingService) {
       everythingService.release(instanceKey)
     }
@@ -264,16 +231,16 @@ Panel {
 
   onEverythingServiceChanged: {
     if (root.opened && everythingService) everythingService.acquire(instanceKey)
-    scheduleRankedItems(rankedItems.length > 0)
+    scheduleRankedItems()
   }
-  Component.onCompleted: scheduleRankedItems(false)
+  Component.onCompleted: scheduleRankedItems()
   Component.onDestruction: if (everythingService) everythingService.release(instanceKey)
 
   Connections {
     target: root.everythingService
     ignoreUnknownSignals: true
-    function onItemsChanged() { root.scheduleRankedItems(true) }
-    function onHiddenIdsChanged() { root.scheduleRankedItems(true) }
+    function onItemsChanged() { root.scheduleRankedItems() }
+    function onHiddenIdsChanged() { root.scheduleRankedItems() }
   }
 
   implicitWidth: button.implicitWidth
@@ -316,7 +283,7 @@ Panel {
     owner: root
     bar: root.bar
     open: root.opened
-    focusTarget: keyCatcher
+    focusTarget: resultList
     contentWidth: popup.fittedContentWidth(Style.space(620))
     contentHeight: popup.cappedContentHeight(Style.space(620))
 
@@ -399,7 +366,7 @@ Panel {
         Accessible.editable: true
         Accessible.focusable: true
         Accessible.focused: activeFocus
-        onTextChanged: root.scheduleRankedItems(false)
+        onTextChanged: root.scheduleRankedItems()
 
         Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) {

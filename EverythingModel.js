@@ -146,24 +146,27 @@ function rank(items, query, hiddenIds) {
   return ranked.map(function(entry) { return entry.item })
 }
 
-function indexOfId(items, id) {
+function itemUuid(item) {
+  if (!item) return ""
+  return String(item.uiUuid || item.id || "")
+}
+
+function indexOfUuid(items, uuid) {
   var source = Array.isArray(items) ? items : []
-  var wanted = String(id || "")
+  var wanted = String(uuid || "")
   if (!wanted) return -1
   for (var i = 0; i < source.length; i++) {
-    if (source[i] && String(source[i].id || "") === wanted) return i
+    if (itemUuid(source[i]) === wanted) return i
   }
   return -1
 }
 
-function indexAfterRefresh(items, selectedId, indexHint) {
+function indexAfterRefresh(items, selectedUuid) {
   var source = Array.isArray(items) ? items : []
   if (source.length === 0) return -1
-  var exact = indexOfId(source, selectedId)
+  var exact = indexOfUuid(source, selectedUuid)
   if (exact >= 0) return exact
-  var hint = Number(indexHint)
-  if (!isFinite(hint)) hint = 0
-  return Math.max(0, Math.min(source.length - 1, Math.floor(hint)))
+  return 0
 }
 
 function clampContentY(value, originY, contentHeight, viewHeight) {
@@ -181,12 +184,6 @@ function anchoredContentY(index, rowHeight, offset, originY, contentHeight, view
   var anchor = Math.max(0, Math.floor(Number(index || 0)))
   var wanted = Number(originY || 0) + anchor * row + Number(offset || 0)
   return clampContentY(wanted, originY, contentHeight, viewHeight)
-}
-
-function nextIndexAfterRemoval(index, lengthBefore) {
-  var remaining = Math.max(0, Number(lengthBefore || 0) - 1)
-  if (remaining === 0) return -1
-  return Math.max(0, Math.min(Number(index || 0), remaining - 1))
 }
 
 function withHidden(hiddenIds, id) {
@@ -207,7 +204,8 @@ function sameStringList(left, right) {
 
 function samePresentation(left, right) {
   if (!left || !right) return false
-  return String(left.id || "") === String(right.id || "")
+  return itemUuid(left) === itemUuid(right)
+    && String(left.id || "") === String(right.id || "")
     && String(left.kind || "") === String(right.kind || "")
     && String(left.provider || "") === String(right.provider || "")
     && String(left.title || "") === String(right.title || "")
@@ -219,24 +217,35 @@ function samePresentation(left, right) {
     && sameStringList(left.badges, right.badges)
 }
 
+function sameRankedItems(currentItems, incomingItems) {
+  var current = Array.isArray(currentItems) ? currentItems : []
+  var incoming = Array.isArray(incomingItems) ? incomingItems : []
+  if (current.length !== incoming.length) return false
+  for (var i = 0; i < current.length; i++) {
+    if (itemUuid(current[i]) !== itemUuid(incoming[i])
+        || !samePresentation(current[i], incoming[i])) return false
+  }
+  return true
+}
+
 function reconcileItems(currentItems, incomingItems) {
   var current = Array.isArray(currentItems) ? currentItems : []
   var incoming = Array.isArray(incomingItems) ? incomingItems : []
   var existing = {}
   var changed = current.length !== incoming.length
   for (var i = 0; i < current.length; i++) {
-    var oldId = current[i] && String(current[i].id || "")
-    if (!oldId || existing[oldId]) changed = true
-    else existing[oldId] = current[i]
+    var oldUuid = itemUuid(current[i])
+    if (!oldUuid || existing[oldUuid]) changed = true
+    else existing[oldUuid] = current[i]
   }
 
   var next = []
   var seen = {}
   for (var row = 0; row < incoming.length; row++) {
     var fresh = incoming[row]
-    var id = fresh && String(fresh.id || "")
-    var previous = id ? existing[id] : null
-    if (!id || seen[id] || !samePresentation(previous, fresh)) {
+    var uuid = itemUuid(fresh)
+    var previous = uuid ? existing[uuid] : null
+    if (!uuid || seen[uuid] || !samePresentation(previous, fresh)) {
       changed = true
       next.push(fresh)
     } else {
@@ -246,7 +255,7 @@ function reconcileItems(currentItems, incomingItems) {
       if (fresh.activationToken) previous.activationToken = fresh.activationToken
       next.push(previous)
     }
-    if (id) seen[id] = true
+    if (uuid) seen[uuid] = true
   }
 
   if (!changed) return { items: current, changed: false }

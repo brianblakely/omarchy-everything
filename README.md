@@ -87,9 +87,12 @@ Hidden IDs stay filtered across refreshes and panel reopenings. They are held
 only in the shell service's memory and reset when this plugin service or
 `omarchy-shell` reloads.
 
-Background provider refreshes preserve the query, highlighted thing, scroll
-anchor, and keyboard focus. Editing the query intentionally starts the newly
-filtered list at its first result.
+Every result has an internal deterministic UUID derived from its stable
+provider, kind, and native identity. Rebuilding an identical ranked sequence
+does not touch the list UI. When the sequence changes, a surviving highlighted
+thing keeps both its highlight and its visual distance from the top of the
+list; short lists simply keep the highlight. If that thing disappeared, the
+first result is selected. The query and keyboard focus remain unchanged.
 
 ## What appears
 

@@ -118,6 +118,11 @@ single refresh followed by a visible stale notification.
 
 - Leave the panel open through several two-second polls. Confirm socket/CLI
   updates merge without Ghostty's modal reopening.
+- With a middle row highlighted, refresh an unchanged result set and confirm
+  the list model is not replaced. Then reorder or add rows and confirm the
+  same UUID stays highlighted at the same visual offset. Remove that row and
+  confirm selection returns to the first result. Repeat with a short list that
+  cannot scroll and confirm only the highlight is preserved.
 - Explicitly refresh and confirm Ghostty scans once, then closes its palette.
 - Kill the helper during a scan and during activation. Confirm panel warnings,
   bounded restart behavior, no persistent worker after close, and restoration
