@@ -220,6 +220,25 @@ class NeovimProvider:
             and context.processes.is_descendant(pid, int(session.get("server_pid") or 0))
         ]
         herdr_server_pids = {int(session.get("server_pid") or 0) for session in herdr_sessions}
+        herdr_environment = context.processes.environment(
+            pid, ("HERDR_SOCKET_PATH", "HERDR_PANE_ID")
+        )
+        environment_matches = [
+            pane
+            for pane in context.provider_metadata.get("herdr", {}).get("panes", [])
+            if str(pane.get("socket") or "")
+            == str(herdr_environment.get("HERDR_SOCKET_PATH") or "")
+            and str(pane.get("pane_id") or "")
+            == str(herdr_environment.get("HERDR_PANE_ID") or "")
+            and int(pane.get("server_pid") or 0) in herdr_server_pids
+        ]
+        if len(environment_matches) == 1:
+            pane = environment_matches[0]
+            return (
+                {"provider": "herdr", "activation": pane.get("activation", {})},
+                str(pane.get("item_id") or ""),
+                False,
+            )
         herdr_matches = [
             pane
             for pane in context.provider_metadata.get("herdr", {}).get("panes", [])
@@ -320,20 +339,16 @@ class NeovimProvider:
         if not buffer or canonical_path(str(buffer.get("name") or "")) != str(activation.get("name") or ""):
             raise CommandError("Neovim buffer closed or its number was reused")
 
-        route = activation.get("route") if isinstance(activation.get("route"), dict) else {}
-        route_provider = str(route.get("provider") or "remote-ui")
-        if route_provider in context.providers:
-            await context.providers[route_provider].activate(
-                dict(route.get("activation") or {}), context
-            )
-
         # win_findbuf reaches an already displayed buffer (including another
         # tab page). Otherwise :hide permits changing the current buffer
-        # without discarding a modified buffer.
+        # without discarding a modified buffer. The fixed numeric result makes
+        # this same RPC authoritative when deciding whether a new client is
+        # permitted; a layout mutation between validation and selection cannot
+        # cause an unnecessary terminal launch.
         expression = (
             "luaeval('(function(b) local w=vim.fn.win_findbuf(b); "
-            "if #w>0 then vim.api.nvim_set_current_win(w[1]) else "
-            "vim.cmd(\"hide buffer \"..b) end; return true end)(_A)',"
+            "if #w>0 then vim.api.nvim_set_current_win(w[1]); return 1 else "
+            "vim.cmd(\"hide buffer \"..b); return 0 end end)(_A)',"
             + str(bufnr)
             + ")"
         )
@@ -342,8 +357,20 @@ class NeovimProvider:
         )
         if result.returncode != 0:
             raise CommandError(result.stderr.strip() or "Neovim refused the buffer switch")
+        selection_result = result.stdout.strip()
+        if selection_result not in {"0", "1"}:
+            raise CommandError("Neovim returned an invalid buffer switch result")
+        used_existing_window = selection_result == "1"
 
-        if route_provider == "remote-ui":
+        route = activation.get("route") if isinstance(activation.get("route"), dict) else {}
+        route_provider = str(route.get("provider") or "remote-ui")
+        if route_provider in context.providers:
+            route_activation = dict(route.get("activation") or {})
+            if used_existing_window:
+                route_activation["allow_new_client"] = False
+            await context.providers[route_provider].activate(route_activation, context)
+
+        if route_provider == "remote-ui" and not used_existing_window:
             await launch_terminal_and_focus(
                 context,
                 ["omarchy-launch-terminal", "nvim", "--server", socket, "--remote-ui"]

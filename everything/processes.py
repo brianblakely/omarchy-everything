@@ -95,6 +95,41 @@ class ProcTable:
             or (process.argv and os.path.basename(process.argv[0]).lower() in wanted)
         ]
 
+    def environment(
+        self,
+        pid: int | str | None,
+        names: Iterable[str],
+        *,
+        proc_root: str = "/proc",
+        max_bytes: int = 256 * 1024,
+    ) -> dict[str, str]:
+        """Read only explicitly requested variables from one same-user process."""
+
+        process = self.get(pid)
+        wanted = {str(name) for name in names if str(name)}
+        if not process or not wanted or max_bytes <= 0:
+            return {}
+        base = Path(proc_root, str(process.pid))
+        try:
+            if os.stat(base, follow_symlinks=False).st_uid != self.uid:
+                return {}
+            with Path(base, "environ").open("rb") as handle:
+                raw = handle.read(max_bytes + 1)
+        except OSError:
+            return {}
+        if len(raw) > max_bytes:
+            return {}
+
+        values: dict[str, str] = {}
+        for entry in raw.split(b"\0"):
+            key, separator, value = entry.partition(b"=")
+            if not separator:
+                continue
+            name = key.decode("utf-8", "replace")
+            if name in wanted:
+                values[name] = value.decode("utf-8", "replace")
+        return values
+
 
 def canonical_path(value: str) -> str:
     if not value:
@@ -110,4 +145,3 @@ def username(uid: int | None = None) -> str:
         return pwd.getpwuid(os.getuid() if uid is None else uid).pw_name
     except KeyError:
         return str(os.getuid() if uid is None else uid)
-

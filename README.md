@@ -119,9 +119,11 @@ does not promise URLs or favicons. There is no browser extension or native
 messaging host.
 
 When a nested tmux, Herdr, Neovim, or Ghostty host cannot be identified without
-guessing, Everything opens a fresh attached terminal client or Neovim remote
-UI. It never hijacks a remote tmux client or routes by a merely similar title.
-Herdr discovery is local-only.
+guessing, Everything may open a fresh attached terminal client or Neovim
+remote UI. For a Neovim buffer this happens only when the buffer is hidden; a
+buffer already shown selects its first existing window and reuses its
+container. Everything never hijacks a remote tmux client or routes by a merely
+similar title. Herdr discovery is local-only.
 
 ## Runtime behavior and privacy
 

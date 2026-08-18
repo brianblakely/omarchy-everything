@@ -71,12 +71,16 @@ because it exists. The helper reads:
 - `/proc/<pid>/cmdline` for executable identity plus explicit tmux `-S` and
   Neovim `--listen` paths;
 - `/proc/<pid>/cwd` for canonical routing context;
+- up to 256 KiB of `/proc/<nvim-pid>/environ`, retaining only
+  `HERDR_SOCKET_PATH` and `HERDR_PANE_ID`, to identify an inherited exact
+  Herdr pane when several panes share a working directory;
 - `/proc/net/unix` and `/proc/<herdr-server-pid>/fd` symlinks to associate a
   listed Herdr socket with its server process;
 - directory ownership from `/proc/<pid>` to exclude other users.
 
-Reads are bounded to numeric processes owned by the current UID. Ordinary
-process names and command lines are never serialized into the public result
+Reads are bounded to numeric processes owned by the current UID. An oversized
+environment read is discarded completely. Ordinary process names, command
+lines, and environment values are never serialized into the public result
 list.
 
 ## Temporary AT-SPI state

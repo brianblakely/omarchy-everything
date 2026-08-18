@@ -379,6 +379,9 @@ class HerdrProvider:
                 raise CommandError("Herdr terminal route is unavailable")
             return
 
+        if activation.get("allow_new_client") is False:
+            return
+
         await launch_terminal_and_focus(
             context,
             ["omarchy-launch-terminal", "herdr", "session", "attach", str(activation.get("session") or "default")]

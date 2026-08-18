@@ -249,6 +249,17 @@ class TmuxProvider:
             await provider.activate(dict(route.get("activation") or {}), context)
             return
 
+        if activation.get("allow_new_client") is False:
+            local_clients = self._local_client_names(context, live_clients)
+            if local_clients:
+                result = await context.runner.run(
+                    ["tmux", "-S", socket, "switch-client", "-c", local_clients[0], "-t", target],
+                    timeout=1.0,
+                )
+                if result.returncode != 0:
+                    raise CommandError(result.stderr.strip() or "tmux target closed")
+            return
+
         session_target = str(activation.get("session_id") or "")
         if not NATIVE_ID.fullmatch(session_target) or not session_target.startswith("$"):
             raise CommandError("tmux target has no live session")
@@ -281,3 +292,23 @@ class TmuxProvider:
             if route is not None:
                 routes.append((str(row[0]), route))
         return routes
+
+    @staticmethod
+    def _local_client_names(context: ScanContext, clients: list[Any]) -> list[str]:
+        names: list[str] = []
+        for row in clients:
+            if not isinstance(row, list) or len(row) < 2:
+                continue
+            try:
+                process = context.processes.get(int(row[1]))
+            except ValueError:
+                continue
+            if not process or (
+                process.comm.lower() != "tmux"
+                and (not process.argv or os.path.basename(process.argv[0]).lower() != "tmux")
+            ):
+                continue
+            name = str(row[0])
+            if name and name not in names:
+                names.append(name)
+        return names

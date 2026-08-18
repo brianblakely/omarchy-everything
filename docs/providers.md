@@ -109,11 +109,14 @@ fixed `--remote-expr` confirms the owning Nvim PID and reads listed buffers plus
 changed, loaded, displayed, current, and last-used state.
 
 Activation revalidates socket owner, process birth, buffer number, and
-canonical name. An existing window/tab is selected when present; otherwise
+canonical name. The first existing window/tab showing the buffer is selected
+when present, and its container is focused in existing-only mode so neither a
+new terminal attach nor a fresh remote UI is opened for that case. Otherwise
 `:hide buffer` switches safely without abandoning a modified buffer. The
-containing tmux or uniquely identified Herdr/terminal surface is routed first.
-When a multiplexer or multi-split Ghostty host cannot be proven unique,
-Everything opens `nvim --server <socket> --remote-ui` in a fresh terminal.
+containing tmux or exact inherited Herdr pane is routed first, with cwd used
+only as a unique fallback. For a hidden buffer whose multiplexer or
+multi-split Ghostty host cannot be proven unique, Everything opens
+`nvim --server <socket> --remote-ui` in a fresh terminal.
 
 ## Other applications
 

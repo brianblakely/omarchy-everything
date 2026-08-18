@@ -109,10 +109,13 @@ single refresh followed by a visible stale notification.
   exact socket focus methods and fresh attach behavior for ambiguous hosts.
 - Neovim: displayed, hidden, loaded, unloaded, and modified listed buffers;
   existing windows on another tab; standalone, tmux-nested, and Herdr-nested
-  servers. Confirm `:hide buffer` preserves modified buffers.
+  servers. Confirm a displayed buffer selects its first existing window and
+  never starts a new terminal attach or remote UI; confirm `:hide buffer`
+  preserves modified buffers.
 - Put nested Neovim instances in duplicate-cwd Herdr panes and multi-split
-  Ghostty surfaces. Confirm unique hosts route first and ambiguous hosts open a
-  fresh `--remote-ui` rather than guessing.
+  Ghostty surfaces. Confirm inherited Herdr pane IDs disambiguate duplicate
+  cwd values, and only hidden buffers with ambiguous hosts open a fresh
+  `--remote-ui` rather than guessing.
 
 ### Lifecycle and recovery
 

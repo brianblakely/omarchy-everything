@@ -22,6 +22,7 @@ from everything.providers.hyprland import launch_terminal_and_focus
 from everything.providers.herdr import HerdrProvider
 from everything.providers.kitty import KittyProvider
 from everything.providers.neovim import NeovimProvider
+from everything.providers.tmux import TmuxProvider
 
 
 class FakeRunner:
@@ -69,6 +70,40 @@ class HerdrTests(unittest.TestCase):
         self.assertIs(parsed, snapshot)
         with self.assertRaises(Exception):
             HerdrProvider._snapshot({"id": "x", "result": {"type": "other"}})
+
+
+class HerdrActivationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_existing_only_focus_never_opens_another_attach(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="everything-herdr-activate-") as root:
+            socket_path = os.path.join(root, "session.sock")
+            handle = socket.socket(socket.AF_UNIX)
+            handle.bind(socket_path)
+            self.addCleanup(handle.close)
+            socket_info = os.stat(socket_path, follow_symlinks=False)
+            context = ScanContext(FakeRunner(""), ProcTable({}))  # type: ignore[arg-type]
+            activation = {
+                "socket": socket_path,
+                "session": "default",
+                "server_pid": 0,
+                "socket_dev": socket_info.st_dev,
+                "socket_ino": socket_info.st_ino,
+                "target_kind": "pane",
+                "target_id": "pane-7",
+                "allow_new_client": False,
+            }
+
+            with patch(
+                "everything.providers.herdr.unix_json_request",
+                new=AsyncMock(return_value={"result": {}}),
+            ) as request, patch(
+                "everything.providers.herdr.launch_terminal_and_focus",
+                new=AsyncMock(),
+            ) as launch:
+                await HerdrProvider().activate(activation, context)
+
+            self.assertEqual(request.await_args.args[1]["method"], "pane.focus")
+            self.assertEqual(request.await_args.args[1]["params"], {"pane_id": "pane-7"})
+            launch.assert_not_awaited()
 
 
 class GhosttyBindingTests(unittest.TestCase):
@@ -263,6 +298,60 @@ class KittyIdentityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first.items[0].activation["socket_ino"], 101)
 
 
+class TmuxActivationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_existing_only_uses_first_local_client_without_new_attach(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="everything-tmux-activate-") as root:
+            socket_path = os.path.join(root, "default")
+            handle = socket.socket(socket.AF_UNIX)
+            handle.bind(socket_path)
+            self.addCleanup(handle.close)
+            runner = FakeRunner("")
+            processes = {
+                77: ProcessInfo(77, 1, "client", "tmux", ("tmux",), "/work")
+            }
+            context = ScanContext(runner, ProcTable(processes))  # type: ignore[arg-type]
+            provider = TmuxProvider()
+            activation = {
+                "socket": socket_path,
+                "server_pid": 10,
+                "birth": "server",
+                "target_id": "%3",
+                "target_kind": "pane",
+                "allow_new_client": False,
+            }
+            clients = [
+                ["/dev/pts/7", "77", "$1", "/dev/pts/7"],
+                ["remote", "999", "$1", "remote"],
+            ]
+
+            with patch(
+                "everything.providers.tmux.process_birth", return_value="server"
+            ), patch.object(
+                provider, "_records", new=AsyncMock(return_value=clients)
+            ), patch(
+                "everything.providers.tmux.launch_terminal_and_focus",
+                new=AsyncMock(),
+            ) as launch:
+                await provider.activate(activation, context)
+
+            self.assertEqual(
+                runner.calls,
+                [
+                    (
+                        "tmux",
+                        "-S",
+                        socket_path,
+                        "switch-client",
+                        "-c",
+                        "/dev/pts/7",
+                        "-t",
+                        "%3",
+                    )
+                ],
+            )
+            launch.assert_not_awaited()
+
+
 class NeovimRoutingTests(unittest.TestCase):
     @staticmethod
     def context() -> ScanContext:
@@ -308,6 +397,45 @@ class NeovimRoutingTests(unittest.TestCase):
         self.assertEqual(route, {"provider": "herdr", "activation": activation})
         self.assertEqual(parent, "herdr-pane")
 
+    def test_herdr_environment_selects_exact_pane_when_cwd_is_shared(self) -> None:
+        context = self.context()
+        expected_activation = {"pane_id": "second"}
+        context.provider_metadata["herdr"] = {
+            "sessions": [{"server_pid": 10}],
+            "panes": [
+                {
+                    "server_pid": 10,
+                    "socket": "/run/user/1000/herdr.sock",
+                    "pane_id": "first",
+                    "cwd": "/project",
+                    "item_id": "first-pane",
+                    "activation": {"pane_id": "first"},
+                },
+                {
+                    "server_pid": 10,
+                    "socket": "/run/user/1000/herdr.sock",
+                    "pane_id": "second",
+                    "cwd": "/project",
+                    "item_id": "second-pane",
+                    "activation": expected_activation,
+                },
+            ],
+        }
+
+        with patch.object(
+            ProcTable,
+            "environment",
+            return_value={
+                "HERDR_SOCKET_PATH": "/run/user/1000/herdr.sock",
+                "HERDR_PANE_ID": "second",
+            },
+        ):
+            route, parent, ambiguous = NeovimProvider._route(context, 30, "/project")
+
+        self.assertEqual(route, {"provider": "herdr", "activation": expected_activation})
+        self.assertEqual(parent, "second-pane")
+        self.assertFalse(ambiguous)
+
     def test_ghostty_requires_process_title_and_cwd_when_multi_surface(self) -> None:
         context = self.context()
         context.provider_metadata["ghostty"] = {
@@ -337,6 +465,146 @@ class NeovimRoutingTests(unittest.TestCase):
         self.assertEqual(route["provider"], "remote-ui")
         self.assertEqual(parent, "")
         self.assertTrue(ambiguous)
+
+
+class NeovimActivationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_displayed_buffer_selects_first_existing_window_without_new_ui(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="everything-nvim-activate-") as root:
+            socket_path = os.path.join(root, "nvim.123.0")
+            handle = socket.socket(socket.AF_UNIX)
+            handle.bind(socket_path)
+            self.addCleanup(handle.close)
+            runner = FakeRunner("1\n")
+            context = ScanContext(runner, ProcTable({}))  # type: ignore[arg-type]
+            provider = NeovimProvider()
+            response = {
+                "pid": 123,
+                "buffers": [
+                    {
+                        "bufnr": 7,
+                        "name": "/work/selected.py",
+                        "windows": [81, 82],
+                    }
+                ],
+            }
+            activation = {
+                "socket": socket_path,
+                "pid": 123,
+                "birth": "birth",
+                "bufnr": 7,
+                "name": "/work/selected.py",
+                "route": {"provider": "remote-ui"},
+            }
+
+            with patch(
+                "everything.providers.neovim.process_birth", return_value="birth"
+            ), patch.object(
+                provider, "_query", new=AsyncMock(return_value=response)
+            ), patch(
+                "everything.providers.neovim.launch_terminal_and_focus",
+                new=AsyncMock(),
+            ) as launch:
+                await provider.activate(activation, context)
+
+            self.assertEqual(len(runner.calls), 1)
+            self.assertIn("nvim_set_current_win(w[1])", runner.calls[0][-1])
+            launch.assert_not_awaited()
+
+    async def test_displayed_buffer_marks_container_existing_only(self) -> None:
+        class RecordingProvider:
+            def __init__(self) -> None:
+                self.activation = None
+
+            async def activate(self, activation, _context) -> None:
+                self.activation = activation
+
+        with tempfile.TemporaryDirectory(prefix="everything-nvim-activate-") as root:
+            socket_path = os.path.join(root, "nvim.125.0")
+            handle = socket.socket(socket.AF_UNIX)
+            handle.bind(socket_path)
+            self.addCleanup(handle.close)
+            runner = FakeRunner("1\n")
+            container = RecordingProvider()
+            context = ScanContext(
+                runner,
+                ProcTable({}),
+                providers={"herdr": container},
+            )  # type: ignore[arg-type]
+            provider = NeovimProvider()
+            response = {
+                "pid": 125,
+                "buffers": [
+                    {"bufnr": 9, "name": "/work/shown.py", "windows": [91]}
+                ],
+            }
+            activation = {
+                "socket": socket_path,
+                "pid": 125,
+                "birth": "birth",
+                "bufnr": 9,
+                "name": "/work/shown.py",
+                "route": {
+                    "provider": "herdr",
+                    "activation": {"pane_id": "pane-9"},
+                },
+            }
+
+            with patch(
+                "everything.providers.neovim.process_birth", return_value="birth"
+            ), patch.object(
+                provider, "_query", new=AsyncMock(return_value=response)
+            ):
+                await provider.activate(activation, context)
+
+            self.assertEqual(
+                container.activation,
+                {"pane_id": "pane-9", "allow_new_client": False},
+            )
+
+    async def test_hidden_buffer_uses_remote_ui_when_host_is_unknown(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="everything-nvim-activate-") as root:
+            socket_path = os.path.join(root, "nvim.124.0")
+            handle = socket.socket(socket.AF_UNIX)
+            handle.bind(socket_path)
+            self.addCleanup(handle.close)
+            runner = FakeRunner("0\n")
+            context = ScanContext(runner, ProcTable({}))  # type: ignore[arg-type]
+            provider = NeovimProvider()
+            response = {
+                "pid": 124,
+                "buffers": [
+                    {"bufnr": 8, "name": "/work/hidden.py", "windows": []}
+                ],
+            }
+            activation = {
+                "socket": socket_path,
+                "pid": 124,
+                "birth": "birth",
+                "bufnr": 8,
+                "name": "/work/hidden.py",
+                "route": {"provider": "remote-ui"},
+            }
+
+            with patch(
+                "everything.providers.neovim.process_birth", return_value="birth"
+            ), patch.object(
+                provider, "_query", new=AsyncMock(return_value=response)
+            ), patch(
+                "everything.providers.neovim.launch_terminal_and_focus",
+                new=AsyncMock(return_value="0xabc"),
+            ) as launch:
+                await provider.activate(activation, context)
+
+            launch.assert_awaited_once_with(
+                context,
+                [
+                    "omarchy-launch-terminal",
+                    "nvim",
+                    "--server",
+                    socket_path,
+                    "--remote-ui",
+                ],
+            )
 
 
 class HostRoutingTests(unittest.TestCase):
