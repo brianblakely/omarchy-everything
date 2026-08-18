@@ -384,7 +384,7 @@ Panel {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        placeholderText: "Search all things…"
+        placeholderText: "Search everything…"
         foreground: root.foreground
         activeFocusOnTab: true
         Accessible.role: Accessible.EditableText

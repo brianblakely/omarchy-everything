@@ -218,7 +218,7 @@ function kindSectionLabel(kind) {
     "herdr-tab": "Herdr tabs",
     "herdr-pane": "Herdr panes",
     "herdr-agent": "Herdr agents",
-    "neovim-buffer": "Neovim buffers"
+    "neovim-buffer": "Buffers"
   }
   return labels[String(kind)] || "Other things"
 }

@@ -73,7 +73,7 @@ const item = (id, title, context, extra = {}) => ({
     "results are grouped by kind and ranked within each group",
   )
   assert.equal(sandbox.kindSectionLabel("browser-tab"), "Browser tabs")
-  assert.equal(sandbox.kindSectionLabel("neovim-buffer"), "Neovim buffers")
+  assert.equal(sandbox.kindSectionLabel("neovim-buffer"), "Buffers")
   assert.equal(sandbox.sectionedRowTop(sandbox.rank(rows, "", {}), 0, 36, 24), 24)
   assert.equal(sandbox.sectionedRowTop(sandbox.rank(rows, "", {}), 2, 36, 24), 120)
 }
@@ -187,6 +187,8 @@ const listHandler = qml.slice(resultListStart, resultDelegateStart)
 const resultDelegateHandler = qml.slice(resultDelegateStart, qml.indexOf("MouseArea", resultDelegateStart))
 const statusHandler = qml.slice(qml.indexOf("id: statusText"), resultListStart)
 assert.doesNotMatch(searchHandler, /Key_Backspace|Key_Delete/, "search owns editing keys")
+assert.match(searchHandler, /placeholderText:\s*"Search everything…"/,
+  "the search placeholder uses the requested copy")
 assert.match(qml, /focusTarget:\s*resultList/,
   "the list owns focus while the shell key catcher remains its navigation wrapper")
 assert.match(qml, /PanelKeyCatcher\s*\{[\s\S]*blocked:\s*searchField\.activeFocus/,
