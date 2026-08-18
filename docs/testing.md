@@ -11,7 +11,8 @@ tests/all.sh
 The suite performs:
 
 - Python compilation and 30+ unit/protocol tests;
-- fuzzy token ranking over titles and displayed group names only, explicit
+- case-insensitive contiguous-substring ranking over titles and displayed group
+  names only, rejection of subsequences and cross-field queries, explicit
   exclusion of context/provider/badges/search terms, stable kind grouping,
   natural displayed-metadata order with relevance/current/recency tie-breakers,
   parent-derived metadata, duplicate identity handling, token authentication,

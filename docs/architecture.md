@@ -75,8 +75,10 @@ bucket for Scratchpad. Search
 relevance, current state, and recency are tie-breakers only. Parent-derived
 tmux and Herdr metadata is resolved from the complete source set before query
 and hidden-ID filtering.
-Query tokens match only the title and the exact displayed group label; context,
-provider, badges, and provider search terms never enter matching.
+The normalized query must match one case-insensitive contiguous substring of
+either the title or exact displayed group label. It cannot be split across
+fields; context, provider, badges, and provider search terms never enter
+matching.
 QML owns the accessible section headings and restores visual offset from the
 live selected delegate geometry, falling back to deterministic section geometry
 when that delegate has not been instantiated. The pure model also derives each

@@ -558,7 +558,7 @@ Panel {
         activeFocusOnTab: true
         Accessible.role: Accessible.EditableText
         Accessible.name: "Search things"
-        Accessible.description: "Type to fuzzily filter the result list"
+        Accessible.description: "Type a contiguous title or group-name substring"
         Accessible.editable: true
         Accessible.focusable: true
         Accessible.focused: activeFocus

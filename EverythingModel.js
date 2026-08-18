@@ -86,39 +86,19 @@ function normalized(value) {
   return text.replace(/\s+/g, " ").trim()
 }
 
-function queryTokens(query) {
-  var value = normalized(query)
-  return value ? value.split(" ").filter(function(token) { return token.length > 0 }) : []
-}
-
-function fuzzyScore(haystack, needle) {
+function substringScore(haystack, needle) {
   var hay = normalized(haystack)
-  var token = normalized(needle)
-  if (!token) return 0
+  var query = normalized(needle)
+  if (!query) return 0
   if (!hay) return -1
 
-  var exact = hay === token
-  var prefix = hay.indexOf(token) === 0
-  var contiguous = hay.indexOf(token)
+  var exact = hay === query
+  var contiguous = hay.indexOf(query)
   if (exact) return 12000
-  if (prefix) return 9000 - Math.min(1000, hay.length - token.length)
-  if (contiguous >= 0) return 7000 - Math.min(2000, contiguous * 16 + hay.length - token.length)
-
-  var cursor = 0
-  var first = -1
-  var previous = -1
-  var gaps = 0
-  var boundaryBonus = 0
-  for (var i = 0; i < token.length; i++) {
-    var found = hay.indexOf(token.charAt(i), cursor)
-    if (found < 0) return -1
-    if (first < 0) first = found
-    if (previous >= 0) gaps += found - previous - 1
-    if (found === 0 || /[\s/_.:\-]/.test(hay.charAt(found - 1))) boundaryBonus += 24
-    previous = found
-    cursor = found + 1
-  }
-  return 4200 + boundaryBonus - Math.min(3000, first * 20 + gaps * 28 + hay.length)
+  if (contiguous === 0) return 9000 - Math.min(1000, hay.length - query.length)
+  if (contiguous > 0)
+    return 7000 - Math.min(2000, contiguous * 16 + hay.length - query.length)
+  return -1
 }
 
 function stringList(value) {
@@ -612,23 +592,22 @@ function kindOrder(kind) {
   return value === undefined ? 1000 : value
 }
 
-function rankedEntry(item, tokens, sourceIndex, relations) {
+function rankedEntry(item, query, sourceIndex, relations) {
   var title = normalized(item.title)
   var group = normalized(kindSectionLabel(item.kind))
   var titleHits = 0
   var groupHits = 0
   var quality = 0
 
-  for (var i = 0; i < tokens.length; i++) {
-    var token = tokens[i]
-    var titleScore = fuzzyScore(title, token)
-    var groupScore = fuzzyScore(group, token)
+  if (query) {
+    var titleScore = substringScore(title, query)
+    var groupScore = substringScore(group, query)
     if (titleScore >= 0) {
-      titleHits++
-      quality += titleScore
+      titleHits = 1
+      quality = titleScore
     } else if (groupScore >= 0) {
-      groupHits++
-      quality += groupScore
+      groupHits = 1
+      quality = groupScore
     } else {
       return null
     }
@@ -655,13 +634,13 @@ function rankedEntry(item, tokens, sourceIndex, relations) {
 function rank(items, query, hiddenIds) {
   var source = Array.isArray(items) ? items : []
   var hidden = hiddenIds || {}
-  var tokens = queryTokens(query)
+  var normalizedQuery = normalized(query)
   var relations = relationIndex(source)
   var ranked = []
   for (var i = 0; i < source.length; i++) {
     var item = source[i]
     if (!item || !item.id || hidden[String(item.id)] === true) continue
-    var entry = rankedEntry(item, tokens, i, relations)
+    var entry = rankedEntry(item, normalizedQuery, i, relations)
     if (entry) ranked.push(entry)
   }
   ranked.sort(function(a, b) {

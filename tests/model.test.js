@@ -94,8 +94,22 @@ const item = (id, title, context, extra = {}) => ({
 
 {
   const rows = [item("one", "Alpha Beta", ""), item("two", "Alpha", "Gamma")]
-  assert.deepEqual(Array.from(sandbox.rank(rows, "alp bet", {}), row => row.id), ["one"])
-  assert.equal(sandbox.rank(rows, "ab", {})[0].id, "one", "subsequence fuzzy matching works")
+  assert.deepEqual(Array.from(sandbox.rank(rows, "alpha be", {}), row => row.id), ["one"],
+    "a contiguous multi-word title substring matches")
+  assert.deepEqual(Array.from(sandbox.rank(rows, "alp bet", {}), row => row.id), [],
+    "separate query fragments do not match across a gap")
+  assert.deepEqual(Array.from(sandbox.rank(rows, "ab", {}), row => row.id), [],
+    "non-contiguous character subsequences do not match")
+  assert.deepEqual(Array.from(sandbox.rank(rows, "PHA B", {}), row => row.id), ["one"],
+    "contiguous substring matching is case-insensitive")
+  assert.deepEqual(Array.from(sandbox.rank([
+    item("browser", "Unrelated", "", { kind: "browser-tab" }),
+  ], "browser tab", {}), row => row.id), ["browser"],
+  "a contiguous displayed-group substring matches")
+  assert.deepEqual(Array.from(sandbox.rank([
+    item("split", "Alpha", "", { kind: "window" }),
+  ], "alpha windows", {}), row => row.id), [],
+  "one query cannot be split between title and group")
 }
 
 {

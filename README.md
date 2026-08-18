@@ -65,9 +65,9 @@ Lua config, validate it with `hyprctl reload` and `hyprctl configerrors`.
 The search field owns focus when the panel opens, so typing filters immediately.
 Press Down or Tab to enter Omarchy's standard list navigation; `/` returns to
 search. While editing, every printable key, including H, J, K, and L, belongs
-to the search field. Every space-separated
-query token must fuzzily match either the thing title or its displayed group
-name. No context, provider, badge, or hidden search term participates. Results
+to the search field. The complete query must occur as one case-insensitive,
+contiguous substring of either the thing title or its displayed group name. No
+context, provider, badge, or hidden search term participates. Results
 are grouped by exact kind in a stable order. Every Herdr group appears before
 the tmux groups, with Herdr agents before the other Herdr groups and Herdr
 sessions after them. Within each group, the
