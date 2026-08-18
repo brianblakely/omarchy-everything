@@ -140,6 +140,8 @@ activation is pending. Hyprland windows arrive first; independent providers
 then stream partial snapshots. Nonintrusive adapters refresh about every two
 seconds while open. Ghostty's modal palette bridge runs once per opening and
 again only to validate an activation; it is excluded from periodic scans.
+The panel remains quiet during discovery: it renders no scan, count, warning,
+or empty-search messages.
 
 AT-SPI is enabled at runtime only for that helper lease. Screen-reader mode is
 never enabled, and a guard restores the prior AT-SPI state on shutdown,

@@ -42,6 +42,9 @@ that opening remains active. Pointer-driven selection passes through the
 shell's `PointerMoveGate`; opening, keyboard navigation, and list mutations
 reset that gate so delegates appearing beneath a stationary pointer cannot
 change the highlighted thing.
+The presentation renders no status row; scan progress, empty searches, counts,
+and provider warnings never become panel messages. Activation failure can still
+use the shell's external notification path after the panel closes.
 
 `Service.qml` is shell-wide. It owns helper leases, request correlation,
 provider partials, activation-token lookup, transient hidden IDs, polling, and

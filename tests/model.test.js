@@ -180,12 +180,11 @@ const item = (id, title, context, extra = {}) => ({
 }
 
 const qml = fs.readFileSync(path.join(root, "Everything.qml"), "utf8")
-const searchHandler = qml.slice(qml.indexOf("id: searchField"), qml.indexOf("id: statusText"))
 const resultListStart = qml.indexOf("id: resultList")
+const searchHandler = qml.slice(qml.indexOf("id: searchField"), resultListStart)
 const resultDelegateStart = qml.indexOf("\n        delegate: Item", resultListStart)
 const listHandler = qml.slice(resultListStart, resultDelegateStart)
 const resultDelegateHandler = qml.slice(resultDelegateStart, qml.indexOf("MouseArea", resultDelegateStart))
-const statusHandler = qml.slice(qml.indexOf("id: statusText"), resultListStart)
 assert.doesNotMatch(searchHandler, /Key_Backspace|Key_Delete/, "search owns editing keys")
 assert.match(searchHandler, /placeholderText:\s*"Search everything…"/,
   "the search placeholder uses the requested copy")
@@ -254,10 +253,8 @@ assert.doesNotMatch(resultDelegateHandler, /border\.(?:width|color)/,
   "the highlighted thing uses fill without an outline")
 assert.doesNotMatch(qml, /refreshButton|Refresh all providers|everythingService\.refresh\(\)/,
   "automatic discovery does not expose a redundant manual refresh control")
-assert.match(statusHandler, /visible:\s*text\.length > 0[\s\S]*height:\s*visible \? Style\.space\(22\) : 0/,
-  "the status row collapses when it has no actionable message")
-assert.doesNotMatch(statusHandler, /rankedItems\.length \+|\? " thing" : " things"/,
-  "the panel does not display a result count")
+assert.doesNotMatch(qml, /statusText|statusMessage|Starting Everything|No matches|Some providers are unavailable|Refreshing…/,
+  "the panel renders no discovery, count, warning, or empty-state messages")
 assert.doesNotMatch(qml, /centerOnBar\s*:/, "panel uses the shell's default icon anchoring")
 assert.doesNotMatch(qml, /function\s+(?:open|close|togglePanel)\s*\(/,
   "panel uses the inherited shell lifecycle")
@@ -265,7 +262,9 @@ assert.match(qml, /onPressed:[^\n]*root\.toggle\(\)/, "bar button uses the inher
 
 const serviceQml = fs.readFileSync(path.join(root, "Service.qml"), "utf8")
 assert.match(serviceQml, /reconcileItems\(items, incoming\)/, "token-only snapshots keep the visible model stable")
-assert.match(serviceQml, /requestScan\(false, true\)/, "background refreshes do not flash status text")
+assert.match(serviceQml, /requestScan\(false\)/, "background refreshes remain automatic")
+assert.doesNotMatch(serviceQml, /statusMessage|activeScanQuiet/,
+  "the service carries no dead panel-message state")
 assert.doesNotMatch(serviceQml, /function refresh\s*\(/,
   "the service has no unused manual refresh entry point")
 

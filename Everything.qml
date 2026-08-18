@@ -409,37 +409,10 @@ Panel {
         }
       }
 
-      Text {
-        id: statusText
-        anchors.top: searchField.bottom
-        anchors.topMargin: visible ? Style.space(7) : 0
-        anchors.left: parent.left
-        anchors.right: parent.right
-        visible: text.length > 0
-        height: visible ? Style.space(22) : 0
-        text: {
-          if (!root.everythingService) return "Starting Everything…"
-          if (root.everythingService.statusMessage) return root.everythingService.statusMessage
-          if (root.rankedItems.length === 0 && searchField.text) return "No matches"
-          if (root.everythingService.warnings.length > 0)
-            return "Some providers are unavailable · " + root.everythingService.warnings[root.everythingService.warnings.length - 1]
-          return ""
-        }
-        color: root.everythingService && root.everythingService.warnings.length > 0
-          ? Color.urgent : root.dimForeground
-        font.family: Style.font.family
-        font.pixelSize: Style.font.caption
-        elide: Text.ElideRight
-        verticalAlignment: Text.AlignVCenter
-        Accessible.role: Accessible.StaticText
-        Accessible.name: text
-        Accessible.description: "Everything status"
-      }
-
       ListView {
         id: resultList
         objectName: "everything-results"
-        anchors.top: statusText.bottom
+        anchors.top: searchField.bottom
         anchors.topMargin: Style.space(4)
         anchors.left: parent.left
         anchors.right: parent.right

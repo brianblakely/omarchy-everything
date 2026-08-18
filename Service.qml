@@ -23,12 +23,10 @@ Item {
   property int pendingActivations: 0
   property int requestSerial: 0
   property string activeScanId: ""
-  property bool activeScanQuiet: false
   property bool helperReady: false
   property bool scanning: false
   property bool intentionalStop: false
   property int crashCount: 0
-  property string statusMessage: ""
   property var requestQueue: []
 
   readonly property string sourceDir: manifest && manifest.__sourceDir
@@ -49,7 +47,7 @@ Item {
     leases = next
     leaseCount = Object.keys(next).length
     ensureHelper()
-    requestScan(true, false)
+    requestScan(true)
   }
 
   function release(ownerKey) {
@@ -66,13 +64,11 @@ Item {
     hiddenIds = Model.withHidden(hiddenIds, id)
   }
 
-  function requestScan(includeGhostty, quiet) {
+  function requestScan(includeGhostty) {
     if (leaseCount <= 0) return
     var requestId = nextRequestId("scan")
     activeScanId = requestId
-    activeScanQuiet = quiet === true
     scanning = true
-    if (!activeScanQuiet) statusMessage = items.length ? "Refreshing…" : "Finding things…"
     sendRequest({
       version: 1,
       id: requestId,
@@ -86,7 +82,6 @@ Item {
     var token = String(activationTokens[String(item.id)] || item.activationToken || "")
     if (!token) return
     pendingActivations += 1
-    statusMessage = "Switching to " + String(item.title || "thing") + "…"
     sendRequest({
       version: 1,
       id: nextRequestId("activate"),
@@ -165,7 +160,6 @@ Item {
 
   function notifyFailure(message) {
     var text = String(message || "The thing is no longer available")
-    statusMessage = text
     if (!omarchyPath) return
     Quickshell.execDetached([
       omarchyPath + "/bin/omarchy-notification-send",
@@ -210,10 +204,8 @@ Item {
         warnings = Array.isArray(message.warnings) ? message.warnings : warnings
         if (String(message.requestId || "") === activeScanId) {
           activeScanId = ""
-          activeScanQuiet = false
           scanning = false
           crashCount = 0
-          statusMessage = items.length ? "" : "No actionable things found"
         }
       } else {
         mergePartial(message.provider, message.items)
@@ -225,8 +217,7 @@ Item {
 
     if (message.type === "activation") {
       pendingActivations = Math.max(0, pendingActivations - 1)
-      if (message.ok === true) statusMessage = ""
-      else notifyFailure(message.message || (message.stale === true
+      if (message.ok !== true) notifyFailure(message.message || (message.stale === true
         ? "That thing closed before it could be focused"
         : "Could not focus that thing"))
       maybeStopTimer.restart()
@@ -287,7 +278,7 @@ Item {
     interval: 2000
     repeat: true
     running: root.leaseCount > 0 && root.helperReady
-    onTriggered: if (!root.scanning) root.requestScan(false, true)
+    onTriggered: if (!root.scanning) root.requestScan(false)
   }
 
   Timer {
@@ -310,7 +301,7 @@ Item {
     repeat: false
     onTriggered: {
       root.ensureHelper()
-      if (root.leaseCount > 0) root.requestScan(true, false)
+      if (root.leaseCount > 0) root.requestScan(true)
     }
   }
 

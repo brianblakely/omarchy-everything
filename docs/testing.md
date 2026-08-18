@@ -17,6 +17,8 @@ The suite performs:
 - deterministic kind icons, one-line row density, vital-metadata selection,
   JavaScript/Qt-list badge normalization, exclusion of redundant kind labels,
   and absence of visual metadata pills;
+- absence of panel scan, count, warning, and empty-result messages while
+  automatic discovery continues;
 - every documented keyboard alias, focus-sensitive Delete/Backspace ownership,
   safe selection after removal, stationary-pointer filtering, deliberate
   pointer selection, and close-before-activation ordering;
@@ -146,8 +148,9 @@ single refresh followed by a visible stale notification.
 - Open the panel while the pointer is stationary over a result. Confirm that
   the pointer does not steal the keyboard highlight; move it deliberately and
   confirm the highlight follows exactly one row. Repeat across a list refresh.
-- Kill the helper during a scan and during activation. Confirm panel warnings,
-  bounded restart behavior, no persistent worker after close, and restoration
-  of the prior AT-SPI state.
+- Kill the helper during a scan and during activation. Confirm the panel stays
+  message-free, activation failure uses the external notification path,
+  restart behavior stays bounded, no worker persists after close, and the
+  prior AT-SPI state is restored.
 - Hide rows, close/reopen the panel, and wait for an automatic refresh: they
   remain hidden. Reload `b.everything` or `omarchy-shell`: they return.
