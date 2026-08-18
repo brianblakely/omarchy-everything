@@ -11,12 +11,13 @@ tests/all.sh
 The suite performs:
 
 - Python compilation and 30+ unit/protocol tests;
-- fuzzy token ranking, stable kind grouping, title/context priority within a
-  group, active/recency order, duplicate identity handling, token
-  authentication, and hidden-result persistence;
+- fuzzy token ranking over titles and displayed group names only, explicit
+  exclusion of context/provider/badges/search terms, stable kind grouping,
+  active/recency order, duplicate identity handling, token authentication, and
+  hidden-result persistence;
 - deterministic kind icons, one-line row density, vital-metadata selection,
   JavaScript/Qt-list badge normalization, exclusion of redundant kind labels,
-  and absence of visual metadata pills;
+  Herdr immediate-parent metadata, and absence of visual metadata pills;
 - absence of panel scan, count, warning, and empty-result messages while
   automatic discovery continues;
 - every documented keyboard alias, focus-sensitive Delete/Backspace ownership,
@@ -68,10 +69,11 @@ single refresh followed by a visible stale notification.
 - Multiple monitors: invoke the shell shortcut while each monitor is focused;
   only that monitor's widget opens. Open two panels by pointer to confirm the
   helper remains leased until both close.
-- Confirm the shell key catcher owns initial focus: H/K and J/L move backward
+- Confirm search owns initial focus and printable input edits it immediately.
+  Press Down or Tab to enter navigation, then confirm H/K and J/L move backward
   and forward like the arrow keys, Enter/Space activates, X hides, and Tab
-  follows Omarchy's adjacent-panel navigation. Press `/` to edit search and
-  confirm H, J, K, and L then insert text instead of moving the selection.
+  follows Omarchy's adjacent-panel navigation. Press `/` to return to search
+  and confirm H, J, K, and L insert text instead of moving the selection.
 - Managed clients across numbered workspaces, a special scratchpad, a group,
   hidden state, and duplicate titles. Confirm layers do not appear.
 - Confirm Foot and Alacritty expose their exact separate Hyprland windows but
@@ -136,8 +138,9 @@ single refresh followed by a visible stale notification.
   cannot scroll and confirm only the highlight is preserved.
 - Populate several kinds at once. Confirm each exact kind has one accessible
   heading, groups remain in stable order, and ranking is preserved within each
-  group. Refresh while the selected row crosses a heading and confirm its
-  visual offset is retained.
+  group. Confirm Herdr agents precede every other Herdr group and Herdr sessions
+  follow all of them. Refresh while the selected row crosses a heading and
+  confirm its visual offset is retained.
 - Confirm every row is one line with a kind icon on the left and exactly one
   status or context value on the right. Exercise long titles and paths, active
   states, modified buffers, detached sessions, and special workspaces; confirm

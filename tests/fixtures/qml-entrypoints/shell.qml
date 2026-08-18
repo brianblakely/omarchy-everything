@@ -123,7 +123,7 @@ ShellRoot {
         failRefreshTest("shell horizontal movement was not routed")
         return
       }
-      listObject.contentY = listObject.originY + widgetObject.rowTopAt(14) + 7
+      listObject.contentY = listObject.originY + widgetObject.rowTopAt(6) + 7
       selectedBeforeRefresh = resultId(listObject.currentIndex)
       selectedOffsetBeforeRefresh = resultVisualOffset(listObject.currentIndex)
       rankedBeforeRefresh = widgetObject.rankedItems
@@ -189,7 +189,7 @@ ShellRoot {
       widgetObject.open()
     } else if (refreshTestStage === 9) {
       widgetObject.focusList(22)
-      listObject.contentY = listObject.originY + widgetObject.rowTopAt(20) + 9
+      listObject.contentY = listObject.originY + widgetObject.rowTopAt(8) + 9
       if (listObject.currentIndex !== 22 || listObject.contentY <= listObject.originY) {
         failRefreshTest("reopen setup")
         return
@@ -204,6 +204,12 @@ ShellRoot {
       }
       if (Math.abs(listObject.contentY - listObject.originY) > 1) {
         failRefreshTest("reopen scroll did not reset")
+        return
+      }
+      // The offscreen test double has no keyboard-focused native surface, so
+      // activeFocus remains false; focus confirms the local target request.
+      if (!searchObject.focus) {
+        failRefreshTest("search did not receive the opening focus request")
         return
       }
       if (widgetObject.pointerCursorActive) {

@@ -80,11 +80,11 @@ Every public item contains:
 | `uiUuid` | Deterministic UUIDv5 derived from provider, kind, and native identity for UI reconciliation |
 | `kind` | One supported actionable thing kind |
 | `provider` | Human-readable provider badge |
-| `title` | Primary search and display title |
-| `context` | Cwd, application, workspace, or container context |
-| `searchTerms` | Additional non-rendered matching terms |
-| `parentId` | Parent thing used to build breadcrumbs |
-| `badges` | Status/type annotations used for search, accessibility, and the row's single vital metadata choice |
+| `title` | Primary display title and the only searchable item field |
+| `context` | Cwd, application, workspace, or container context; never searched |
+| `searchTerms` | Provider-supplied aliases retained in the contract but not used by panel matching |
+| `parentId` | Parent thing used to build breadcrumbs and Herdr child-row metadata |
+| `badges` | Status/type annotations used for accessibility and the row's single vital metadata choice; never searched |
 | `active` | Whether this is the provider's current thing |
 | `recency` | Provider-local ranking hint |
 | `activationToken` | Authenticated, process-local opaque activation reference |

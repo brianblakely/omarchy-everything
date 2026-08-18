@@ -184,8 +184,13 @@ function contextMetadata(item, breadcrumb) {
   return value || provider
 }
 
-function vitalMetadata(item, breadcrumb) {
+function vitalMetadata(item, breadcrumb, parentTitle) {
   if (!item) return ""
+  var kind = String(item.kind || "")
+  if (kind === "herdr-workspace" || kind === "herdr-tab" || kind === "herdr-pane") {
+    var parent = String(parentTitle || "").trim()
+    if (parent) return parent
+  }
   var badges = badgeList(item.badges)
   var priorities = [
     "error", "blocked", "modified", "working", "scratchpad", "hidden",
@@ -233,11 +238,11 @@ function kindOrder(kind) {
     "tmux-session": 5,
     "tmux-window": 6,
     "tmux-pane": 7,
-    "herdr-session": 8,
+    "herdr-agent": 8,
     "herdr-workspace": 9,
     "herdr-tab": 10,
     "herdr-pane": 11,
-    "herdr-agent": 12,
+    "herdr-session": 12,
     "neovim-buffer": 13
   }
   var value = order[String(kind)]
@@ -246,29 +251,21 @@ function kindOrder(kind) {
 
 function rankedEntry(item, tokens, sourceIndex) {
   var title = normalized(item.title)
-  var context = normalized(item.context)
-  var typeText = normalized(String(item.provider || "") + " " + kindLabel(item.kind)
-                            + " " + stringList(item.badges).join(" ")
-                            + " " + stringList(item.searchTerms).join(" "))
+  var group = normalized(kindSectionLabel(item.kind))
   var titleHits = 0
-  var contextHits = 0
-  var typeHits = 0
+  var groupHits = 0
   var quality = 0
 
   for (var i = 0; i < tokens.length; i++) {
     var token = tokens[i]
     var titleScore = fuzzyScore(title, token)
-    var contextScore = fuzzyScore(context, token)
-    var typeScore = fuzzyScore(typeText, token)
+    var groupScore = fuzzyScore(group, token)
     if (titleScore >= 0) {
       titleHits++
       quality += titleScore
-    } else if (contextScore >= 0) {
-      contextHits++
-      quality += contextScore
-    } else if (typeScore >= 0) {
-      typeHits++
-      quality += typeScore
+    } else if (groupScore >= 0) {
+      groupHits++
+      quality += groupScore
     } else {
       return null
     }
@@ -281,8 +278,7 @@ function rankedEntry(item, tokens, sourceIndex) {
   return {
     item: item,
     titleHits: titleHits,
-    contextHits: contextHits,
-    typeHits: typeHits,
+    groupHits: groupHits,
     quality: quality,
     active: item.active === true ? 1 : 0,
     recency: Math.max(-4000, Math.min(4000, recency)),
@@ -304,7 +300,7 @@ function rank(items, query, hiddenIds) {
   ranked.sort(function(a, b) {
     var groupOrder = kindOrder(a.item.kind) - kindOrder(b.item.kind)
     if (groupOrder !== 0) return groupOrder
-    var fields = ["titleHits", "contextHits", "typeHits", "quality", "active", "recency"]
+    var fields = ["titleHits", "groupHits", "quality", "active", "recency"]
     for (var field = 0; field < fields.length; field++) {
       var name = fields[field]
       if (a[name] !== b[name]) return b[name] - a[name]

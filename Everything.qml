@@ -164,7 +164,7 @@ Panel {
       if (!root.opened) return
       if (typeof resultList.forceLayout === "function") resultList.forceLayout()
       root.applyOpenResultReset()
-      resultList.forceActiveFocus()
+      searchField.forceActiveFocus()
     })
   }
 
@@ -254,6 +254,12 @@ Panel {
     if (context && (values.length === 0 || values[values.length - 1] !== context))
       values.push(context)
     return values.join("  ›  ")
+  }
+
+  function parentTitle(item) {
+    if (!item || !item.parentId) return ""
+    var parent = itemForId(String(item.parentId))
+    return parent ? String(parent.title || "") : ""
   }
 
   function handleSupplementalListKey(event) {
@@ -348,7 +354,7 @@ Panel {
     owner: root
     bar: root.bar
     open: root.opened
-    focusTarget: resultList
+    focusTarget: searchField
     contentWidth: popup.fittedContentWidth(Style.space(620))
     contentHeight: popup.cappedContentHeight(Style.space(620))
 
@@ -416,7 +422,7 @@ Panel {
         anchors.topMargin: Style.space(4)
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: footer.top
+        anchors.bottom: parent.bottom
         anchors.bottomMargin: Style.space(6)
         clip: true
         model: root.rankedItems
@@ -480,7 +486,8 @@ Panel {
               || resultList.activeFocus || keyCatcher.activeFocus)
             && resultList.currentIndex === index
           readonly property string crumb: root.breadcrumb(modelData)
-          readonly property string metadata: Model.vitalMetadata(modelData, crumb)
+          readonly property string metadata: Model.vitalMetadata(
+            modelData, crumb, root.parentTitle(modelData))
 
           Accessible.role: Accessible.ListItem
           Accessible.name: String(modelData.title || "Untitled")
@@ -576,21 +583,6 @@ Panel {
         }
       }
 
-      Text {
-        id: footer
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        height: Style.space(20)
-        text: "HJKL/↑↓ move  ·  Enter switch  ·  / search  ·  X hide  ·  Esc clear/close"
-        color: root.dimForeground
-        font.family: Style.font.family
-        font.pixelSize: Style.font.caption
-        horizontalAlignment: Text.AlignHCenter
-        verticalAlignment: Text.AlignVCenter
-        Accessible.role: Accessible.StaticText
-        Accessible.name: "Keyboard help: H J K L or arrows move, Enter switches, slash searches, X hides, Escape clears or closes"
-      }
     }
   }
 }

@@ -62,18 +62,23 @@ Lua config, validate it with `hyprctl reload` and `hyprctl configerrors`.
 
 ## Keyboard controls
 
-The panel opens in Omarchy's standard keyboard-navigation mode. Press `/` or
-click the search field to edit the query; while editing, every printable key,
-including H, J, K, and L, belongs to the search field. Every space-separated
-query token must fuzzily match a title, breadcrumb/context, provider, type,
-badge, or search term. Results are grouped by exact kind in a stable order;
-within each group, title matches rank first, followed by context/type, the
-current thing, and recency. Opening beneath a stationary pointer does not move
-the keyboard highlight; pointer selection begins only after actual movement.
+The search field owns focus when the panel opens, so typing filters immediately.
+Press Down or Tab to enter Omarchy's standard list navigation; `/` returns to
+search. While editing, every printable key, including H, J, K, and L, belongs
+to the search field. Every space-separated
+query token must fuzzily match either the thing title or its displayed group
+name. No context, provider, badge, or hidden search term participates. Results
+are grouped by exact kind in a stable order, with Herdr agents before the other
+Herdr groups and Herdr sessions after all of them. Within each group, title
+matches rank first, followed by group-name match quality, the current thing,
+and recency. Opening beneath a stationary pointer does not move the keyboard
+highlight; pointer selection begins only after actual movement.
 Each result is one line: a deterministic kind icon, its title, and one vital
-status or context value. Status annotations remain searchable and available to
-assistive technology, but are not rendered as pills. The right-side value never
-repeats the kind already communicated by the section and icon.
+status or context value. Status annotations remain available to assistive
+technology but are not searchable or rendered as pills. The right-side value
+never repeats the kind already communicated by the section and icon. Herdr
+workspaces, tabs, and panes show their immediate parent's name there; Herdr
+agents and sessions retain their own status metadata.
 
 | Focus | Keys | Action |
 |---|---|---|

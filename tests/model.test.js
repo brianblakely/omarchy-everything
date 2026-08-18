@@ -29,6 +29,8 @@ const item = (id, title, context, extra = {}) => ({
     item("context", "Unrelated", "Project Alpha", { active: true, recency: 4000 }),
     item("title", "Alpha notes", "Old", { recency: -4000 }),
   ]
+  assert.equal(sandbox.rank(rows, "alpha", {}).length, 1,
+    "context-only matches are excluded")
   assert.equal(sandbox.rank(rows, "alpha", {})[0].id, "title", "title match wins before active/recency")
 }
 
@@ -42,14 +44,45 @@ const item = (id, title, context, extra = {}) => ({
 
 {
   const rows = [
-    item("type", "Unrelated", "Elsewhere", { provider: "Alpha", active: true, recency: 4000 }),
+    item("provider", "Unrelated", "Elsewhere", {
+      provider: "Alpha", active: true, recency: 4000,
+    }),
     item("context", "Unrelated", "Alpha project", { recency: -4000 }),
+    item("badge", "Unrelated", "Elsewhere", { badges: ["Alpha"] }),
+    item("term", "Unrelated", "Elsewhere", { searchTerms: ["Alpha"] }),
   ]
-  assert.equal(sandbox.rank(rows, "alpha", {})[0].id, "context", "context match wins before type/current")
+  assert.equal(sandbox.rank(rows, "alpha", {}).length, 0,
+    "provider, context, badges, and hidden terms are not searchable")
   assert.equal(
     sandbox.rank([item("old", "A", ""), item("new", "B", "", { recency: 10 })], "", {})[0].id,
     "new",
     "recency breaks otherwise equal unfiltered rows",
+  )
+}
+
+{
+  const rows = [
+    item("window", "Unrelated", "", { kind: "window" }),
+    item("buffer", "Unrelated", "", { kind: "neovim-buffer" }),
+  ]
+  assert.deepEqual(Array.from(sandbox.rank(rows, "windows", {}), row => row.id), ["window"],
+    "the displayed Windows group name is searchable")
+  assert.deepEqual(Array.from(sandbox.rank(rows, "buffers", {}), row => row.id), ["buffer"],
+    "the displayed Buffers group name is searchable")
+}
+
+{
+  const rows = [
+    item("pane", "Pane", "", { kind: "herdr-pane" }),
+    item("session", "Session", "", { kind: "herdr-session" }),
+    item("agent", "Agent", "", { kind: "herdr-agent" }),
+    item("tab", "Tab", "", { kind: "herdr-tab" }),
+    item("workspace", "Workspace", "", { kind: "herdr-workspace" }),
+  ]
+  assert.deepEqual(
+    Array.from(sandbox.rank(rows, "", {}), row => row.id),
+    ["agent", "workspace", "tab", "pane", "session"],
+    "Herdr agents come first and sessions come last",
   )
 }
 
@@ -117,6 +150,20 @@ const item = (id, title, context, extra = {}) => ({
       item(kind, "Title", "Useful context", { kind, provider: "Provider", badges: [label] }), "")
     assert.notEqual(metadata, label, `${kind} metadata does not repeat its kind`)
   }
+  for (const kind of ["herdr-workspace", "herdr-tab", "herdr-pane"]) {
+    assert.equal(sandbox.vitalMetadata(
+      item(kind, "Child", "Fallback", { kind, badges: [sandbox.kindLabel(kind), "Working"] }),
+      "Ancestor › Fallback", "Immediate parent"), "Immediate parent",
+    `${kind} metadata is its immediate parent name`)
+  }
+  assert.equal(sandbox.vitalMetadata(
+    item("herdr-agent", "Agent", "Fallback", { kind: "herdr-agent", badges: ["Claude", "Working"] }),
+    "Ancestor › Fallback", "Parent pane"), "Working",
+  "Herdr agents keep status metadata")
+  assert.equal(sandbox.vitalMetadata(
+    item("herdr-session", "Session", "Fallback", { kind: "herdr-session", badges: ["Session", "Attached"] }),
+    "Fallback", "Ignored parent"), "Attached",
+  "Herdr sessions keep session metadata")
 }
 
 {
@@ -188,8 +235,8 @@ const resultDelegateHandler = qml.slice(resultDelegateStart, qml.indexOf("MouseA
 assert.doesNotMatch(searchHandler, /Key_Backspace|Key_Delete/, "search owns editing keys")
 assert.match(searchHandler, /placeholderText:\s*"Search everything…"/,
   "the search placeholder uses the requested copy")
-assert.match(qml, /focusTarget:\s*resultList/,
-  "the list owns focus while the shell key catcher remains its navigation wrapper")
+assert.match(qml, /focusTarget:\s*searchField/,
+  "search is the panel's initial focus target")
 assert.match(qml, /PanelKeyCatcher\s*\{[\s\S]*blocked:\s*searchField\.activeFocus/,
   "the standard shell key catcher yields only while search is being edited")
 assert.match(qml, /onMoveRequested:[\s\S]*dy !== 0 \? dy : dx[\s\S]*moveSelection\(delta\)/,
@@ -218,6 +265,8 @@ assert.match(qml, /contentHeight > resultList\.height[\s\S]*clampContentY\(rowVi
   "scroll offset is restored only when the sectioned list can scroll")
 assert.match(qml, /function resetResultsForOpen\(\)[\s\S]*resultUpdateSerial \+= 1[\s\S]*applyOpenResultReset\(\)/,
   "opening invalidates stale refresh restores and resets the selected thing")
+assert.match(qml, /root\.applyOpenResultReset\(\)[\s\S]*searchField\.forceActiveFocus\(\)/,
+  "opening focuses search after resetting the results")
 assert.match(qml, /function applyOpenResultReset\(\)[\s\S]*currentIndex = index[\s\S]*contentY = resultList\.originY/,
   "opening selects the first thing and resets the list scroll")
 assert.match(qml, /onOpenedChanged:[\s\S]*searchField\.text = ""[\s\S]*rebuildRankedItems\(\)[\s\S]*resetResultsForOpen\(\)/,
@@ -242,6 +291,10 @@ assert.match(qml, /id:\s*thingIcon[\s\S]*Model\.kindIcon\(row\.modelData\.kind\)
   "every row displays its deterministic kind icon")
 assert.match(qml, /id:\s*metadataLabel[\s\S]*text:\s*row\.metadata/,
   "every row renders one selected metadata value")
+assert.match(qml, /function parentTitle[\s\S]*itemForId[\s\S]*parent\.title/,
+  "the panel resolves immediate parent names from public items")
+assert.match(qml, /vitalMetadata\([\s\S]*modelData, crumb, root\.parentTitle\(modelData\)\)/,
+  "row metadata receives the immediate parent name")
 assert.doesNotMatch(qml, /id:\s*badgeRow|id:\s*badgeLabel|radius:\s*height \/ 2/,
   "result rows do not render metadata pills")
 const titleHandler = qml.slice(qml.indexOf("id: titleLabel"), qml.indexOf("MouseArea", qml.indexOf("id: titleLabel")))
@@ -255,6 +308,8 @@ assert.doesNotMatch(qml, /refreshButton|Refresh all providers|everythingService\
   "automatic discovery does not expose a redundant manual refresh control")
 assert.doesNotMatch(qml, /statusText|statusMessage|Starting Everything|No matches|Some providers are unavailable|Refreshing…/,
   "the panel renders no discovery, count, warning, or empty-state messages")
+assert.doesNotMatch(qml, /id:\s*footer|HJKL\/↑↓ move|Keyboard help:/,
+  "the panel renders no control-instruction footer")
 assert.doesNotMatch(qml, /centerOnBar\s*:/, "panel uses the shell's default icon anchoring")
 assert.doesNotMatch(qml, /function\s+(?:open|close|togglePanel)\s*\(/,
   "panel uses the inherited shell lifecycle")

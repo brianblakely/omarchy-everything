@@ -35,10 +35,11 @@ the wire schema and [provider behavior](providers.md) for adapter guarantees.
 `Everything.qml` is one bar instance per monitor. It owns the panel, search
 focus, highlighted UUID, list scroll state, accessibility, and close-before-
 activation ordering. It uses the shell's `KeyboardPanel`, icon anchoring, and
-`PanelKeyCatcher`; shell navigation remains authoritative. Each opening clears
-search, selects the first ranked thing, and resets the list to its scroll
-origin. UUID and visual-offset preservation applies only to refreshes while
-that opening remains active. Pointer-driven selection passes through the
+`PanelKeyCatcher`; shell navigation remains authoritative after search hands
+focus to the list. Each opening clears and focuses search, selects the first
+ranked thing, and resets the list to its scroll origin. UUID and visual-offset
+preservation applies only to refreshes while that opening remains active.
+Pointer-driven selection passes through the
 shell's `PointerMoveGate`; opening, keyboard navigation, and list mutations
 reset that gate so delegates appearing beneath a stationary pointer cannot
 change the highlighted thing.
@@ -56,6 +57,8 @@ metadata may change without replacing the visible list. A UI update is needed
 only when the ordered UUID sequence or a rendered trait changes; genuine list
 changes preserve the highlighted UUID and its visual offset when possible.
 It orders exact kind groups deterministically and ranks rows within each group.
+Query tokens match only the title and the exact displayed group label; context,
+provider, badges, and provider search terms never enter matching.
 QML owns the accessible section headings and restores visual offset from the
 live selected delegate geometry, falling back to deterministic section geometry
 when that delegate has not been instantiated. The pure model also derives each
@@ -64,7 +67,9 @@ icon, title, and value on a single line. Kind labels are excluded from metadata;
 provider-specific kind-bearing fallbacks are reduced to their useful identity
 or location before display. Badge normalization accepts both JavaScript arrays
 and Qt typed lists, including their comma-joined bridge representation, before
-the kind filter runs.
+the kind filter runs. QML resolves the immediate public parent title; the model
+uses it for Herdr workspace, tab, and pane metadata, while agent and session
+metadata retain their status semantics.
 
 ## Helper and provider ownership
 
