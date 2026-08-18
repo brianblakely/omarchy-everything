@@ -68,13 +68,18 @@ search. While editing, every printable key, including H, J, K, and L, belongs
 to the search field. Every space-separated
 query token must fuzzily match either the thing title or its displayed group
 name. No context, provider, badge, or hidden search term participates. Results
-are grouped by exact kind in a stable order, with Herdr agents before the other
-Herdr groups and Herdr sessions after all of them. Within each group, the
+are grouped by exact kind in a stable order. Every Herdr group appears before
+the tmux groups, with Herdr agents before the other Herdr groups and Herdr
+sessions after them. Within each group, the
 displayed metadata is sorted naturally, so `Workspace 2` precedes
 `Workspace 10`, with `Scratchpad` after the regular window workspaces; title
 and group-name match quality, the current thing, and recency break metadata
 ties. Opening beneath a stationary pointer does not move the keyboard highlight;
 pointer selection begins only after actual movement.
+With navigation focused, Left or H collapses the highlighted group and keeps
+its heading selected; Up and Down skip its hidden rows. Right or L expands it
+back to the previously highlighted thing. Opening the panel again expands all
+groups.
 Each result is one line: its icon, title, and one vital status or context
 value. Windows use Omarchy's known Nerd Font app glyph when available;
 otherwise their resolved application image is recolored like a glyph, with a
@@ -82,20 +87,24 @@ generic window fallback. Herdr agents reuse Omarchy's agent robot, and other
 things use deterministic kind glyphs. Status annotations
 remain available to assistive technology but are not searchable or rendered
 as pills. The right-side value
-never repeats the kind already communicated by the section and icon. Herdr
-workspaces, tabs, and panes show their immediate parent's name there; Herdr
-agents and sessions retain their own status metadata.
+never repeats the kind already communicated by the section and icon. tmux
+windows and panes, plus Herdr workspaces, tabs, and panes, show their immediate
+parent's name there. tmux sessions and Herdr agents/sessions retain their own
+status metadata. Buffers show their containing directory; unnamed buffers use
+the editor's working directory.
 
 | Focus | Keys | Action |
 |---|---|---|
-| Navigation | `H`, `K`, `Left`, `Up` | Move to the previous result |
-| Navigation | `J`, `L`, `Down`, `Right` | Move to the next result |
+| Navigation | `K`, `Up` | Move to the previous visible result or collapsed group |
+| Navigation | `J`, `Down` | Move to the next visible result or collapsed group |
+| Navigation | `H`, `Left` | Collapse the current group |
+| Navigation | `L`, `Right` | Expand the current group |
 | Navigation | `Home`, `End`, `g`, `G` | Move to the first or last result |
 | Navigation | `Page Up`, `Page Down`, `Ctrl+U`, `Ctrl+D` | Move one visible page |
 | Navigation | `Ctrl+P`, `Ctrl+N` | Move to the previous or next result |
-| Navigation | `Enter`, `Space` | Close Everything, then activate the highlighted thing |
+| Navigation | `Enter`, `Space` | Expand a collapsed group, or close Everything and activate the highlighted thing |
 | Navigation | `/` | Focus the search field |
-| Navigation | `X`, `Backspace`, `Delete` | Hide only the actively highlighted result |
+| Navigation | `X`, `Backspace`, `Delete` | Hide only an actively highlighted visible result |
 | Navigation | `Tab`, `Shift+Tab` | Use Omarchy's standard adjacent-panel navigation |
 | Search | `Down`, `Tab` | Return to navigation at the first result |
 | Either | `Escape` | Clear a nonempty query and return to search; a second press closes |
@@ -119,7 +128,8 @@ and resets the list to the top.
   scratchpads, and hidden windows.
 - Strict native browser tabs for Chromium, Chrome, Brave variants, Edge,
   Firefox, Zen, Vivaldi, Helium, and LibreWolf, plus strict native GTK/Qt
-  application tabs exposed through AT-SPI.
+  application tabs exposed through AT-SPI. Browser app-mode windows remain
+  available only as their managed window row.
 - Kitty OS windows, tabs, and panes; Ghostty 1.3.1 native tabs and surfaces;
   exact Foot and Alacritty windows.
 - Same-user tmux sessions, windows, and panes from default and custom sockets.

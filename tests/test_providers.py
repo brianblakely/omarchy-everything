@@ -369,6 +369,16 @@ class NeovimRoutingTests(unittest.TestCase):
         }
         return ScanContext(FakeRunner(""), ProcTable(processes))  # type: ignore[arg-type]
 
+    def test_buffer_metadata_directory_uses_file_parent_or_editor_cwd(self) -> None:
+        self.assertEqual(
+            NeovimProvider._buffer_directory("/work/project/src/main.py", "/work/project"),
+            "/work/project/src",
+        )
+        self.assertEqual(
+            NeovimProvider._buffer_directory("", "/work/project"),
+            "/work/project",
+        )
+
     def test_herdr_same_cwd_ambiguity_opens_remote_ui(self) -> None:
         context = self.context()
         context.provider_metadata["herdr"] = {

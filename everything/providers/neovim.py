@@ -28,6 +28,10 @@ class NeovimProvider:
     name = "neovim"
 
     @staticmethod
+    def _buffer_directory(name: str, editor_cwd: str) -> str:
+        return str(Path(name).parent) if name else editor_cwd
+
+    @staticmethod
     def _runtime_sockets(root: str, *, max_entries: int = 4096) -> set[str]:
         """Find current Nvim sockets directly below a run dir or its tempdir.
 
@@ -153,6 +157,7 @@ class NeovimProvider:
                     continue
                 name = canonical_path(str(buffer.get("name") or ""))
                 title = Path(name).name if name else f"[No Name {bufnr}]"
+                directory = self._buffer_directory(name, editor_cwd)
                 changed = bool(buffer.get("changed"))
                 loaded = bool(buffer.get("loaded"))
                 windows = [int(value) for value in buffer.get("windows", []) if str(value).isdigit()]
@@ -181,7 +186,7 @@ class NeovimProvider:
                         kind="neovim-buffer",
                         provider="Neovim",
                         title=title + (" [+]" if changed else ""),
-                        context=name or f"Neovim server {Path(socket).name}",
+                        context=directory or f"Neovim server {Path(socket).name}",
                         search_terms=["neovim", "nvim", name, str(bufnr)],
                         parent_id=parent_id,
                         badges=badges,

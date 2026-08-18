@@ -30,17 +30,27 @@ outside every `DOCUMENT_*` subtree. It rejects dock, tool, sidebar, inspector,
 and developer-tool strips, then chooses a browser's primary strip by real page
 tab count with depth as a tie-breaker. This supports horizontal, vertical, and
 custom native tab-strip layouts without accepting page-authored ARIA tabs.
+When a managed browser is first seen, discovery allows one bounded settle pass
+for its native controls: Chromium can publish the top-level frame before its
+tab strip has arrived on AT-SPI. Managed-window rows still publish immediately,
+and later browser rows merge into the same open panel.
 
 Recognized current Omarchy browser classes cover Chromium, Chrome, Brave
-variants, Edge, Firefox, Zen, Vivaldi, Helium, and LibreWolf. PWA and private
-windows use the same strict per-window matching. Generic GTK/Qt applications
-must expose a shallow, fully actionable native tab strip. DOM/editor tabs with
-no reliable external adapter remain represented by their outer window.
+variants, Edge, Firefox, Zen, Vivaldi, Helium, and LibreWolf. Normal private
+windows use the same strict per-window matching. App-mode/PWA windows are
+identified from the current browser-derived class or Omarchy launch-time web
+identity and emit no tab row—not even a generic application-tab row—because
+their single browser tab is not distinct from the managed window. Generic
+GTK/Qt applications must expose a shallow, fully actionable native tab strip.
+DOM/editor tabs with no reliable external adapter remain represented by their
+outer window.
 
 AT-SPI exposes titles. URLs, favicons, and browser history are not part of the
 0.0.1 contract. The browser-side assumptions are intentionally limited to the
 [Chromium accessibility architecture](https://chromium.googlesource.com/chromium/src/%2B/main/docs/accessibility/overview.md)
 and equivalent native AT-SPI trees in the other listed families.
+Activation invokes the native tab's exposed default action (including
+Chromium's `dodefault`) before focusing its exact managed window.
 
 ## Kitty
 
@@ -98,6 +108,11 @@ terminal. Detached, remote-only, or ambiguous-host targets open a fresh local
 terminal attached directly to the session and target. Existing remote clients
 are never selected as hosts.
 
+The line metadata stays structural and compact: sessions show Attached or
+Detached, windows show their session name, and panes show their window name.
+Native IDs, socket paths, cwd chains, and deeper ancestry remain available to
+the provider for identity and routing but are not rendered in that value.
+
 ## Herdr
 
 `herdr session list --json` supplies running local session sockets. Everything
@@ -117,6 +132,10 @@ or its one-level private tempdir, `${TMPDIR:-/tmp}/nvim.<username>`, or explicit
 live `--listen` argv. Discovery is same-user, non-symlink, and entry bounded; a
 fixed `--remote-expr` confirms the owning Nvim PID and reads listed buffers plus
 changed, loaded, displayed, current, and last-used state.
+Named buffer rows use the filename as their title and its canonical containing
+directory as their display context. An unnamed buffer uses the editor's
+canonical working directory. Status badges remain available to accessibility
+and activation continues to use the separately revalidated canonical name.
 
 Activation revalidates socket owner, process birth, buffer number, and
 canonical name. The first existing window/tab showing the buffer is selected

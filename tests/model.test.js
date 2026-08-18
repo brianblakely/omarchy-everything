@@ -78,11 +78,17 @@ const item = (id, title, context, extra = {}) => ({
     item("agent", "Agent", "", { kind: "herdr-agent" }),
     item("tab", "Tab", "", { kind: "herdr-tab" }),
     item("workspace", "Workspace", "", { kind: "herdr-workspace" }),
+    item("tmux-pane", "Pane", "", { kind: "tmux-pane" }),
+    item("tmux-session", "Session", "", { kind: "tmux-session" }),
+    item("tmux-window", "Window", "", { kind: "tmux-window" }),
   ]
   assert.deepEqual(
     Array.from(sandbox.rank(rows, "", {}), row => row.id),
-    ["agent", "workspace", "tab", "pane", "session"],
-    "Herdr agents come first and sessions come last",
+    [
+      "agent", "workspace", "tab", "pane", "session",
+      "tmux-session", "tmux-window", "tmux-pane",
+    ],
+    "Herdr groups precede tmux, with agents first and Herdr sessions last",
   )
 }
 
@@ -109,6 +115,30 @@ const item = (id, title, context, extra = {}) => ({
   assert.equal(sandbox.kindSectionLabel("neovim-buffer"), "Buffers")
   assert.equal(sandbox.sectionedRowTop(sandbox.rank(rows, "", {}), 0, 36, 24), 24)
   assert.equal(sandbox.sectionedRowTop(sandbox.rank(rows, "", {}), 2, 36, 24), 120)
+}
+
+{
+  const rows = [
+    item("window-one", "One", "", { kind: "window" }),
+    item("window-two", "Two", "", { kind: "window" }),
+    item("agent-one", "One", "", { kind: "herdr-agent" }),
+    item("agent-two", "Two", "", { kind: "herdr-agent" }),
+    item("tmux-one", "One", "", { kind: "tmux-pane" }),
+    item("tmux-two", "Two", "", { kind: "tmux-pane" }),
+  ]
+  const collapsed = { "herdr-agent": true, "tmux-pane": true }
+  assert.equal(sandbox.groupStartIndex(rows, 3), 2)
+  assert.equal(sandbox.groupEndIndex(rows, 2), 3)
+  assert.equal(sandbox.adjacentNavigableIndex(rows, 1, 1, collapsed), 2,
+    "vertical movement enters a collapsed group at its heading")
+  assert.equal(sandbox.adjacentNavigableIndex(rows, 3, 1, collapsed), 4,
+    "vertical movement leaves a collapsed group without visiting hidden rows")
+  assert.equal(sandbox.adjacentNavigableIndex(rows, 4, -1, collapsed), 2,
+    "reverse movement targets the preceding collapsed heading")
+  assert.equal(sandbox.boundaryNavigableIndex(rows, 1, collapsed), 4,
+    "last targets the heading when the final group is collapsed")
+  assert.equal(sandbox.sectionedRowTop(rows, 4, 36, 24, collapsed), 144,
+    "collapsed rows contribute no height while every group retains its heading")
 }
 
 {
@@ -213,8 +243,10 @@ const item = (id, title, context, extra = {}) => ({
       badges: "Window,Workspace 1",
     }), ""), "Workspace 1", "comma-serialized badge metadata excludes the kind")
   assert.equal(sandbox.vitalMetadata(
-    item("buffer", "File", "/tmp/file", { kind: "neovim-buffer", badges: ["Buffer", "Modified", "Visible"] }), ""),
-    "Modified")
+    item("buffer", "File", "/tmp/project", {
+      kind: "neovim-buffer", badges: ["Buffer", "Modified", "Visible"],
+    }), "Container › /tmp/project"),
+    "/tmp/project", "buffer metadata is its containing directory, not status or ancestry")
   assert.equal(sandbox.vitalMetadata(
     item("browser", "Site", "Browser · native tab", { kind: "browser-tab", provider: "Firefox", badges: ["Tab", "Title only"] }), ""),
     "Firefox")
@@ -223,7 +255,15 @@ const item = (id, title, context, extra = {}) => ({
     "Project › /src")
   assert.equal(sandbox.vitalMetadata(
     item("tmux-window", "Editor", "tmux window @4", { kind: "tmux-window", provider: "tmux", badges: ["Window"] }),
-    "dev › tmux window @4"), "dev › @4")
+    "dev › tmux window @4", "dev"), "dev", "tmux windows show their session name")
+  assert.equal(sandbox.vitalMetadata(
+    item("tmux-pane", "Shell", "/src/project", { kind: "tmux-pane", provider: "tmux", badges: ["Pane"] }),
+    "dev › editor › /src/project", "editor"), "editor", "tmux panes show their window name")
+  assert.equal(sandbox.vitalMetadata(
+    item("orphaned-tmux-pane", "Shell", "/src/project", {
+      kind: "tmux-pane", provider: "tmux", badges: ["Pane"],
+    }), "dev › editor › /src/project", ""), "tmux",
+  "tmux child metadata never falls back to a native id or cwd chain")
   assert.equal(sandbox.vitalMetadata(
     item("surface", "Shell", "Ghostty surface", { kind: "terminal-pane", provider: "Ghostty", badges: ["Surface"] }),
     "Terminal › Ghostty surface"), "Terminal")
@@ -333,10 +373,11 @@ assert.match(qml, /focusTarget:\s*searchField/,
   "search is the panel's initial focus target")
 assert.match(qml, /PanelKeyCatcher\s*\{[\s\S]*blocked:\s*searchField\.activeFocus/,
   "the standard shell key catcher yields only while search is being edited")
-assert.match(qml, /onMoveRequested:[\s\S]*dy !== 0 \? dy : dx[\s\S]*moveSelection\(delta\)/,
-  "the shell's H J K L and arrow directions drive the list")
-assert.match(qml, /onActivateRequested:\s*root\.activateAt/,
-  "the shell's Enter and Space action activates the selected thing")
+assert.match(qml,
+  /onMoveRequested:[\s\S]*dy !== 0[\s\S]*moveSelection\(dy\)[\s\S]*dx < 0[\s\S]*collapseCurrentGroup\(\)[\s\S]*dx > 0[\s\S]*expandCurrentGroup\(\)/,
+  "the shell's vertical directions move while horizontal directions fold groups")
+assert.match(qml, /onActivateRequested:\s*root\.activateCurrent/,
+  "the shell's Enter and Space action activates a row or expands a collapsed group")
 assert.match(qml, /onDeleteRequested:\s*root\.hideAt/,
   "the shell's X action hides the selected thing")
 assert.match(qml, /onTabRequested:[^\n]*root\.switchPanel\(direction\)/,
@@ -346,6 +387,8 @@ assert.match(listHandler, /Keys\.onPressed[\s\S]*handleSupplementalListKey/,
 assert.doesNotMatch(listHandler, /Key_Down|Key_Up|Key_Left|Key_Right|Key_Return|Key_Enter|Key_Tab|Key_Escape/,
   "the list does not override standard shell navigation")
 assert.match(qml, /Key_Backspace[\s\S]*Key_Delete[\s\S]*action = "hide"/, "Backspace and Delete hide list rows")
+assert.match(qml, /function hideAt[\s\S]*!selectionIsVisibleRow\(index\)[\s\S]*hideItem/,
+  "hide keys cannot remove the hidden representative of a collapsed group")
 assert.match(qml, /root\.close\(\)[\s\S]*Qt\.callLater[\s\S]*everythingService\.activate/, "panel closes before activation")
 assert.match(qml, /onItemsChanged\(\)[\s\S]*scheduleRankedItems\(\)/,
   "provider refresh rebuilds through identity-aware reconciliation")
@@ -355,10 +398,10 @@ assert.match(qml, /indexAfterRefresh\(rankedItems, selectedItemUuid/,
   "selection is restored by deterministic UI UUID")
 assert.match(qml, /function rowVisualTop[\s\S]*itemAtIndex[\s\S]*delegateItem\.y/,
   "scroll restoration reads the selected delegate's live geometry")
-assert.match(qml, /contentHeight > resultList\.height[\s\S]*clampContentY\(rowVisualTop\(index\) \+ savedSelectedOffset/,
+assert.match(qml, /contentHeight > resultList\.height[\s\S]*clampContentY\(selectionVisualTop\(index\) \+ savedSelectedOffset/,
   "scroll offset is restored only when the sectioned list can scroll")
-assert.match(qml, /function resetResultsForOpen\(\)[\s\S]*resultUpdateSerial \+= 1[\s\S]*applyOpenResultReset\(\)/,
-  "opening invalidates stale refresh restores and resets the selected thing")
+assert.match(qml, /function resetResultsForOpen\(\)[\s\S]*resultUpdateSerial \+= 1[\s\S]*collapsedKinds = \(\{\}\)[\s\S]*applyOpenResultReset\(\)/,
+  "opening invalidates stale refresh restores, expands groups, and resets selection")
 assert.match(qml, /root\.applyOpenResultReset\(\)[\s\S]*searchField\.forceActiveFocus\(\)/,
   "opening focuses search after resetting the results")
 assert.match(qml, /function applyOpenResultReset\(\)[\s\S]*currentIndex = index[\s\S]*contentY = resultList\.originY/,
@@ -381,6 +424,11 @@ assert.match(qml, /readonly property real rowHeight:\s*Style\.font\.body \* 1\.5
   "result row height scales to one and a half times the thing-name font")
 assert.match(qml, /section\.property:\s*"kind"[\s\S]*section\.delegate:[\s\S]*Accessible\.Heading/,
   "the list renders accessible kind headings")
+assert.match(qml, /id:\s*sectionHeading[\s\S]*readonly property bool collapsed:[\s\S]*Accessible\.focused:\s*highlighted/,
+  "a collapsed group leaves its accessible heading as the visible focus target")
+assert.match(resultDelegateHandler,
+  /height:\s*groupCollapsed \? 0 : root\.rowHeight[\s\S]*visible:\s*!groupCollapsed/,
+  "collapsing a group hides its rows without removing its heading")
 assert.match(qml, /import QtQuick\.Effects/,
   "the window image fallback can use the shell-compatible color effect")
 assert.match(qml, /id:\s*mappedWindowGlyph[\s\S]*text:\s*row\.windowAppGlyph/,

@@ -27,6 +27,7 @@ Panel {
   readonly property real rowHeight: Style.font.body * 1.5
   readonly property int sectionHeight: Style.space(24)
   property var rankedItems: []
+  property var collapsedKinds: ({})
   property string selectedItemUuid: ""
   property real savedSelectedOffset: 0
   property bool savedListFocus: false
@@ -59,6 +60,21 @@ Panel {
     searchField.forceActiveFocus()
   }
 
+  function groupCollapsed(kind) {
+    return collapsedKinds && collapsedKinds[String(kind || "")] === true
+  }
+
+  function currentGroupKind() {
+    var index = resultList.currentIndex
+    if (index < 0 || index >= rankedItems.length) return ""
+    return String(rankedItems[index] && rankedItems[index].kind || "")
+  }
+
+  function selectionIsVisibleRow(index) {
+    return index >= 0 && index < rankedItems.length
+      && !groupCollapsed(rankedItems[index].kind)
+  }
+
   function focusList(index) {
     if (resultList.count <= 0) return
     disarmPointer()
@@ -75,16 +91,74 @@ Panel {
     var bounded = Math.max(0, Math.min(Number(index || 0), resultList.count - 1))
     resultList.currentIndex = bounded
     selectedItemUuid = Model.itemUuid(rankedItems[bounded])
-    if (reveal === true) resultList.positionViewAtIndex(bounded, ListView.Contain)
+    if (reveal === true) revealSelection(bounded, false)
   }
 
   function moveSelection(delta) {
-    if (resultList.count <= 0) return
-    focusList(Math.max(0, Math.min(resultList.count - 1, resultList.currentIndex + delta)))
+    if (resultList.count <= 0 || Number(delta || 0) === 0) return
+    var direction = delta < 0 ? -1 : 1
+    var steps = Math.max(1, Math.floor(Math.abs(Number(delta))))
+    var candidate = resultList.currentIndex
+    if (candidate < 0)
+      candidate = Model.boundaryNavigableIndex(rankedItems, direction, collapsedKinds)
+    for (var step = 0; step < steps; step++) {
+      var next = Model.adjacentNavigableIndex(
+        rankedItems, candidate, direction, collapsedKinds)
+      if (next === candidate) break
+      candidate = next
+    }
+    focusList(candidate)
+  }
+
+  function focusBoundary(direction) {
+    focusList(Model.boundaryNavigableIndex(rankedItems, direction, collapsedKinds))
+  }
+
+  function setGroupCollapsed(kind, collapsed) {
+    var value = String(kind || "")
+    var wanted = collapsed === true
+    if (!value || groupCollapsed(value) === wanted) return
+
+    var nextKinds = {}
+    for (var key in collapsedKinds) {
+      if (collapsedKinds[key] === true) nextKinds[key] = true
+    }
+    if (wanted) nextKinds[value] = true
+    else delete nextKinds[value]
+    collapsedKinds = nextKinds
+    disarmPointer()
+    var index = resultList.currentIndex
+    if (typeof resultList.forceLayout === "function") resultList.forceLayout()
+    revealSelection(index, wanted)
+  }
+
+  function collapseCurrentGroup() {
+    var kind = currentGroupKind()
+    if (kind) setGroupCollapsed(kind, true)
+  }
+
+  function expandCurrentGroup() {
+    var kind = currentGroupKind()
+    if (kind) setGroupCollapsed(kind, false)
+  }
+
+  function toggleGroupFromHeading(kind) {
+    var index = -1
+    for (var itemIndex = 0; itemIndex < rankedItems.length; itemIndex++) {
+      if (String(rankedItems[itemIndex].kind || "") === String(kind || "")) {
+        index = itemIndex
+        break
+      }
+    }
+    if (index < 0) return
+    setCurrentIndex(index, false)
+    resultList.forceActiveFocus()
+    setGroupCollapsed(kind, !groupCollapsed(kind))
   }
 
   function activateAt(index) {
-    if (index < 0 || index >= rankedItems.length || !everythingService) return
+    if (index < 0 || index >= rankedItems.length || !everythingService
+        || !selectionIsVisibleRow(index)) return
     var target = rankedItems[index]
     // Release the layer-shell keyboard grab before asking another surface to
     // accept focus. Service.qml keeps the helper alive for the pending action.
@@ -92,8 +166,17 @@ Panel {
     Qt.callLater(function() { everythingService.activate(target) })
   }
 
+  function activateCurrent() {
+    if (groupCollapsed(currentGroupKind())) {
+      expandCurrentGroup()
+      return
+    }
+    activateAt(resultList.currentIndex)
+  }
+
   function hideAt(index) {
-    if (index < 0 || index >= rankedItems.length || !everythingService) return
+    if (index < 0 || index >= rankedItems.length || !everythingService
+        || !selectionIsVisibleRow(index)) return
     everythingService.hideItem(rankedItems[index].id)
   }
 
@@ -107,7 +190,8 @@ Panel {
   }
 
   function rowTopAt(index) {
-    return Model.sectionedRowTop(rankedItems, index, rowHeight, sectionHeight)
+    return Model.sectionedRowTop(
+      rankedItems, index, rowHeight, sectionHeight, collapsedKinds)
   }
 
   function rowVisualTop(index) {
@@ -118,21 +202,46 @@ Panel {
     return resultList.originY + rowTopAt(index)
   }
 
+  function selectionVisualTop(index) {
+    var top = rowVisualTop(index)
+    if (index >= 0 && index < rankedItems.length
+        && groupCollapsed(rankedItems[index].kind)) top -= sectionHeight
+    return top
+  }
+
+  function revealSelection(index, alignTop) {
+    if (index < 0 || index >= rankedItems.length) return
+    if (typeof resultList.forceLayout === "function") resultList.forceLayout()
+    var top = selectionVisualTop(index)
+    var extent = groupCollapsed(rankedItems[index].kind) ? sectionHeight : rowHeight
+    var wanted = resultList.contentY
+    if (alignTop === true || top < wanted) wanted = top
+    else if (top + extent > wanted + resultList.height)
+      wanted = top + extent - resultList.height
+    resultList.contentY = Model.clampContentY(
+      wanted, resultList.originY, resultList.contentHeight, resultList.height)
+  }
+
   function pageDelta(direction) {
     if (resultList.count <= 0 || direction === 0) return 0
     var current = Math.max(0, Math.min(resultList.count - 1, resultList.currentIndex))
-    var target = rowVisualTop(current) + (direction > 0 ? resultList.height : -resultList.height)
+    var target = selectionVisualTop(current)
+      + (direction > 0 ? resultList.height : -resultList.height)
     var candidate = current
-    if (direction > 0) {
-      while (candidate + 1 < resultList.count && rowVisualTop(candidate + 1) <= target)
-        candidate++
-      if (candidate === current && candidate + 1 < resultList.count) candidate++
-    } else {
-      while (candidate - 1 >= 0 && rowVisualTop(candidate - 1) >= target)
-        candidate--
-      if (candidate === current && candidate > 0) candidate--
+    var steps = 0
+    while (true) {
+      var next = Model.adjacentNavigableIndex(
+        rankedItems, candidate, direction, collapsedKinds)
+      if (next === candidate) break
+      var nextTop = selectionVisualTop(next)
+      if ((direction > 0 && nextTop > target)
+          || (direction < 0 && nextTop < target)) break
+      candidate = next
+      steps++
     }
-    return candidate - current
+    if (steps === 0 && Model.adjacentNavigableIndex(
+        rankedItems, candidate, direction, collapsedKinds) !== candidate) steps = 1
+    return direction > 0 ? steps : -steps
   }
 
   function rememberFocusState() {
@@ -148,7 +257,7 @@ Panel {
       selectedItemUuid = Model.itemUuid(rankedItems[current])
     }
     savedSelectedOffset = current >= 0
-      ? resultList.contentY - rowVisualTop(current) : 0
+      ? resultList.contentY - selectionVisualTop(current) : 0
   }
 
   function applyOpenResultReset() {
@@ -164,6 +273,7 @@ Panel {
     // fresh-open state after the panel becomes visible again.
     disarmPointer()
     resultUpdateSerial += 1
+    collapsedKinds = ({})
     resultUpdateInProgress = false
     pendingSelectionSurvived = false
     applyOpenResultReset()
@@ -224,7 +334,7 @@ Panel {
 
     if (pendingSelectionSurvived && index >= 0
         && resultList.contentHeight > resultList.height + 0.5) {
-      resultList.contentY = Model.clampContentY(rowVisualTop(index) + savedSelectedOffset,
+      resultList.contentY = Model.clampContentY(selectionVisualTop(index) + savedSelectedOffset,
         resultList.originY, resultList.contentHeight, resultList.height)
     } else if (!pendingSelectionSurvived) {
       resultList.contentY = resultList.originY
@@ -300,8 +410,8 @@ Panel {
     event.accepted = true
     if (action === "next") moveSelection(1)
     else if (action === "previous") moveSelection(-1)
-    else if (action === "first") focusList(0)
-    else if (action === "last") focusList(resultList.count - 1)
+    else if (action === "first") focusBoundary(-1)
+    else if (action === "last") focusBoundary(1)
     else if (action === "page-next") moveSelection(pageDelta(1))
     else if (action === "page-previous") moveSelection(pageDelta(-1))
     else if (action === "hide") hideAt(resultList.currentIndex)
@@ -344,9 +454,34 @@ Panel {
 
   BarIconButton {
     id: button
+    objectName: "everything-bar-button"
     anchors.fill: parent
     bar: root.bar
     text: "\uf078"
+    iconComponent: Component {
+      Item {
+        id: chevronFrame
+        objectName: "everything-bar-chevron"
+        // QML pixel-aligns the even optical canvas inside the odd bar slot.
+        // Counter that half-pixel shift without moving the slot or hit target.
+        readonly property real buttonCenterX: button.width / 2
+          - Math.round((button.width - width) / 2)
+        readonly property real centerErrorX: chevron.x
+          + chevron.paintedCenterX - buttonCenterX
+
+        OpticalGlyph {
+          id: chevron
+          width: parent.width
+          height: parent.height
+          x: chevronFrame.buttonCenterX - paintedCenterX
+          text: button.text
+          fontFamily: button.fontFamily
+          fontSize: button.fontSize
+          color: button.active && button.useActiveColor
+            ? button.activeColor : button.foreground
+        }
+      }
+    }
     active: root.opened
     tooltipText: "Everything"
     activeFocusOnTab: true
@@ -390,17 +525,18 @@ Panel {
       blocked: searchField.activeFocus
 
       onMoveRequested: function(dx, dy) {
-        var delta = dy !== 0 ? dy : dx
-        if (delta !== 0) root.moveSelection(delta)
+        if (dy !== 0) root.moveSelection(dy)
+        else if (dx < 0) root.collapseCurrentGroup()
+        else if (dx > 0) root.expandCurrentGroup()
       }
-      onActivateRequested: root.activateAt(resultList.currentIndex)
+      onActivateRequested: root.activateCurrent()
       onCloseRequested: root.handleEscape()
       onDeleteRequested: root.hideAt(resultList.currentIndex)
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(text) {
         if (text === "/") root.focusSearch()
-        else if (text === "g") root.focusList(0)
-        else if (text === "G") root.focusList(resultList.count - 1)
+        else if (text === "g") root.focusBoundary(-1)
+        else if (text === "G") root.focusBoundary(1)
       }
 
       Item {
@@ -432,7 +568,7 @@ Panel {
           if (event.key === Qt.Key_Down || (event.key === Qt.Key_Tab
               && (event.modifiers & Qt.ShiftModifier) === 0)) {
             event.accepted = true
-            root.focusList(0)
+            root.focusBoundary(-1)
           } else if (event.key === Qt.Key_Escape) {
             event.accepted = true
             root.handleEscape()
@@ -458,7 +594,7 @@ Panel {
         highlightMoveDuration: 80
         Accessible.role: Accessible.List
         Accessible.name: "Ranked thing list"
-        Accessible.description: "Use arrow keys or H J K L to select and Enter to switch"
+        Accessible.description: "Use Up and Down to select; Left and Right collapse or expand the current group"
         Accessible.focusable: count > 0
         Accessible.focused: activeFocus
 
@@ -470,13 +606,41 @@ Panel {
           objectName: "everything-section-" + section
           width: ListView.view.width
           height: root.sectionHeight
+          readonly property bool collapsed: root.groupCollapsed(section)
+          readonly property bool highlighted: collapsed
+            && (resultList.activeFocus || keyCatcher.activeFocus)
+            && root.currentGroupKind() === section
 
           Accessible.role: Accessible.Heading
           Accessible.name: Model.kindSectionLabel(sectionHeading.section)
+            + (collapsed ? ", collapsed" : ", expanded")
+          Accessible.focusable: collapsed
+          Accessible.focused: highlighted
+          Accessible.onPressAction: root.toggleGroupFromHeading(section)
+
+          Rectangle {
+            anchors.fill: parent
+            anchors.bottomMargin: Style.space(1)
+            radius: Style.cornerRadius
+            color: sectionHeading.highlighted
+              ? Style.focusFillFor(root.foreground, Color.accent)
+              : "transparent"
+          }
 
           Text {
+            id: sectionDisclosure
             anchors.left: parent.left
             anchors.leftMargin: Style.space(8)
+            anchors.verticalCenter: parent.verticalCenter
+            text: sectionHeading.collapsed ? "\uf054" : "\uf078"
+            color: sectionHeading.highlighted ? root.foreground : root.dimForeground
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+          }
+
+          Text {
+            anchors.left: sectionDisclosure.right
+            anchors.leftMargin: Style.space(6)
             anchors.right: parent.right
             anchors.rightMargin: Style.space(8)
             anchors.verticalCenter: parent.verticalCenter
@@ -486,6 +650,12 @@ Panel {
             font.pixelSize: Style.font.caption
             font.bold: true
             elide: Text.ElideRight
+          }
+
+          MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.toggleGroupFromHeading(sectionHeading.section)
           }
         }
 
@@ -506,8 +676,11 @@ Panel {
           required property var modelData
           required property int index
           width: resultList.width
-          height: root.rowHeight
-          readonly property bool highlighted: (root.pointerCursorActive
+          height: groupCollapsed ? 0 : root.rowHeight
+          visible: !groupCollapsed
+          enabled: !groupCollapsed
+          readonly property bool groupCollapsed: root.groupCollapsed(modelData.kind)
+          readonly property bool highlighted: !groupCollapsed && (root.pointerCursorActive
               || resultList.activeFocus || keyCatcher.activeFocus)
             && resultList.currentIndex === index
           readonly property string crumb: root.breadcrumb(modelData)

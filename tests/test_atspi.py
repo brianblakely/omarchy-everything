@@ -1,8 +1,21 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
-from everything.providers.atspi import Atspi, AtspiTree, BROWSER_CLASS, TopLevel
+from everything.commands import CommandRunner
+from everything.processes import ProcTable
+from everything.providers.atspi import (
+    Atspi,
+    AtspiProvider,
+    AtspiTree,
+    BROWSER_CLASS,
+    NativeTab,
+    TopLevel,
+    is_browser_app_mode,
+    invoke_accessible,
+)
+from everything.providers.base import ScanContext
 
 
 class FakeStateSet:
@@ -16,12 +29,17 @@ class FakeStateSet:
 class FakeAction:
     def __init__(self, names: tuple[str, ...] = ("activate",)) -> None:
         self.names = names
+        self.invoked: list[int] = []
 
     def get_n_actions(self) -> int:
         return len(self.names)
 
     def get_action_name(self, index: int) -> str:
         return self.names[index]
+
+    def do_action(self, index: int) -> bool:
+        self.invoked.append(index)
+        return True
 
 
 class FakeAccessible:
@@ -123,6 +141,161 @@ class NativeTabTests(unittest.TestCase):
         )
         self.assertTrue(all(BROWSER_CLASS.search(value) for value in classes))
         self.assertFalse(any(BROWSER_CLASS.search(value) for value in ("Citizen", "ledger", "frozen-app")))
+
+    def test_browser_app_mode_is_distinct_from_normal_and_private_windows(self) -> None:
+        app_mode_clients = (
+            {
+                "class": "chrome-github.com__-Default",
+                "initialClass": "chrome-github.com__-Default",
+                "initialTitle": "github.com_/",
+            },
+            {
+                "class": "chromium-app.example.test__dashboard-Default",
+                "initialTitle": "app.example.test_/dashboard",
+            },
+            {
+                "class": "com.google.Chrome",
+                "initialTitle": "mail.example.test_/inbox",
+            },
+        )
+        normal_clients = (
+            {"class": "chromium", "initialTitle": "New tab - Chromium"},
+            {"class": "google-chrome", "initialTitle": "New Incognito Tab - Google Chrome"},
+            {"class": "firefox", "initialTitle": "Mozilla Firefox Private Browsing"},
+        )
+
+        self.assertTrue(all(is_browser_app_mode(client) for client in app_mode_clients))
+        self.assertFalse(any(is_browser_app_mode(client) for client in normal_clients))
+
+    def test_chromium_default_action_activates_a_tab(self) -> None:
+        tab = FakeAccessible(
+            Atspi.Role.PAGE_TAB,
+            "Native tab",
+            actionable=True,
+        )
+        tab.action = FakeAction(("dodefault", "showcontextmenu"))
+
+        self.assertTrue(invoke_accessible(tab))
+        self.assertEqual(tab.action.invoked, [0])
+
+    def test_provider_retries_first_seen_browser_until_tabs_are_available(self) -> None:
+        client = {
+            "address": "0xabc",
+            "pid": 42,
+            "class": "chromium",
+            "title": "Current page - Chromium",
+            "focusHistoryID": 0,
+        }
+        top = TopLevel(None, object(), 42, 0, client["title"], client)
+        tab = NativeTab(
+            accessible=object(),
+            top=top,
+            strip_path=(0,),
+            tab_path=(0, 0),
+            index=0,
+            title="Current page",
+            selected=True,
+            native_id="native-tab-1",
+        )
+
+        class DelayedTree:
+            scans = 0
+
+            def top_levels(self, _context):
+                return [top]
+
+            def native_tabs(self, _top, *, browser):
+                self.__class__.scans += 1
+                return [tab] if browser and self.__class__.scans >= 2 else []
+
+        context = ScanContext(
+            runner=CommandRunner(),
+            processes=ProcTable({}),
+            hypr_clients=[client],
+            provider_metadata={
+                "hyprland": {
+                    "clients": [{"address": "0xabc", "item_id": "hyprland:window"}]
+                }
+            },
+        )
+        provider = AtspiProvider()
+
+        with patch("everything.providers.atspi.AtspiTree", DelayedTree), patch(
+            "everything.providers.atspi.BROWSER_SETTLE_DELAYS", (0,)
+        ), patch("everything.providers.atspi.process_birth", return_value="birth"):
+            result = provider._scan_sync(context)
+
+        self.assertEqual(DelayedTree.scans, 2)
+        self.assertEqual(len(result.items), 1)
+        self.assertEqual(result.items[0].kind, "browser-tab")
+        self.assertEqual(result.items[0].title, "Current page")
+        self.assertEqual(result.items[0].parent_id, "hyprland:window")
+        self.assertEqual(result.items[0].activation["address"], "0xabc")
+
+    def test_provider_omits_app_mode_tabs_without_reclassifying_them(self) -> None:
+        normal_client = {
+            "address": "0xnormal",
+            "pid": 42,
+            "class": "chromium",
+            "initialClass": "chromium",
+            "title": "Current page - Chromium",
+            "initialTitle": "New tab - Chromium",
+            "focusHistoryID": 0,
+        }
+        app_client = {
+            "address": "0xapp",
+            "pid": 42,
+            "class": "chrome-app.example.test__-Default",
+            "initialClass": "chrome-app.example.test__-Default",
+            "title": "Example app",
+            "initialTitle": "app.example.test_/",
+            "focusHistoryID": 1,
+        }
+        normal_top = TopLevel(None, object(), 42, 0, normal_client["title"], normal_client)
+        app_top = TopLevel(None, object(), 42, 1, app_client["title"], app_client)
+
+        class MixedTree:
+            def top_levels(self, _context):
+                return [normal_top, app_top]
+
+            def native_tabs(self, top, *, browser):
+                return [
+                    NativeTab(
+                        accessible=object(),
+                        top=top,
+                        strip_path=(0,),
+                        tab_path=(0, 0),
+                        index=0,
+                        title="Normal tab" if top is normal_top else "App-mode tab",
+                        selected=True,
+                        native_id="normal-tab" if top is normal_top else "app-tab",
+                    )
+                ]
+
+        context = ScanContext(
+            runner=CommandRunner(),
+            processes=ProcTable({}),
+            hypr_clients=[normal_client, app_client],
+            provider_metadata={
+                "hyprland": {
+                    "clients": [
+                        {"address": "0xnormal", "item_id": "hyprland:normal"},
+                        {"address": "0xapp", "item_id": "hyprland:app"},
+                    ]
+                }
+            },
+        )
+        provider = AtspiProvider()
+
+        with patch("everything.providers.atspi.AtspiTree", MixedTree), patch(
+            "everything.providers.atspi.process_birth", return_value="birth"
+        ):
+            result = provider._scan_sync(context)
+
+        self.assertEqual([item.title for item in result.items], ["Normal tab"])
+        self.assertEqual(result.items[0].kind, "browser-tab")
+        self.assertEqual(result.items[0].parent_id, "hyprland:normal")
+        self.assertEqual(set(provider._browser_clients(context).values()), {"0xnormal"})
 
 
 if __name__ == "__main__":

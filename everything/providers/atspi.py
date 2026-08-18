@@ -28,8 +28,18 @@ BROWSER_CLASS = re.compile(
     r"firefox|zen|vivaldi|helium|librewolf)(?=$|[._-])",
     re.IGNORECASE,
 )
+BROWSER_APP_MODE_CLASS = re.compile(
+    r"^(?:chromium|google-chrome|chrome|brave(?:-browser)?|microsoft-edge|firefox|"
+    r"zen|vivaldi(?:-stable)?|helium|librewolf)-.+-Default$",
+    re.IGNORECASE,
+)
+BROWSER_APP_MODE_TITLE = re.compile(
+    r"^[a-z0-9.-]+(?::[0-9]+)?_/.*$",
+    re.IGNORECASE,
+)
 GHOSTTY_CLASS = re.compile(r"(?:com\.mitchellh\.ghostty|ghostty)", re.IGNORECASE)
 REJECTED_STRIP_NAME = re.compile(r"(?:dock|tool|sidebar|side panel|developer tools|inspector)", re.IGNORECASE)
+BROWSER_SETTLE_DELAYS = (0.1, 0.2, 0.4, 0.8)
 
 
 def clean_text(value: Any) -> str:
@@ -43,6 +53,19 @@ def folded(value: Any) -> str:
         for character in unicodedata.normalize("NFKD", clean_text(value).lower())
         if not unicodedata.combining(character)
     )
+
+
+def is_browser_app_mode(client: dict[str, Any]) -> bool:
+    classes = [
+        clean_text(client.get("class")),
+        clean_text(client.get("initialClass")),
+    ]
+    if not any(BROWSER_CLASS.search(value) for value in classes if value):
+        return False
+    if any(BROWSER_APP_MODE_CLASS.fullmatch(value) for value in classes if value):
+        return True
+    initial_title = clean_text(client.get("initialTitle"))
+    return bool(initial_title and BROWSER_APP_MODE_TITLE.fullmatch(initial_title))
 
 
 def safe_call(default: Any, function: Callable[..., Any], *args: Any) -> Any:
@@ -125,7 +148,10 @@ def action_names(accessible: Any) -> list[str]:
     return [clean_text(safe_call("", action.get_action_name, index)).lower() for index in range(count)]
 
 
-def invoke_accessible(accessible: Any, preferred: Iterable[str] = ("activate", "click", "press", "select")) -> bool:
+def invoke_accessible(
+    accessible: Any,
+    preferred: Iterable[str] = ("activate", "click", "press", "select", "dodefault"),
+) -> bool:
     action = safe_call(None, accessible.get_action_iface)
     if action:
         names = action_names(accessible)
@@ -323,22 +349,94 @@ class AtspiProvider:
 
     def __init__(self) -> None:
         self.objects: dict[str, NativeTab] = {}
+        self.settled_browser_clients: set[tuple[str, int, str]] = set()
 
     async def scan(self, context: ScanContext) -> ProviderResult:
-        return await asyncio.to_thread(self._scan_sync, context)
+        cancellation = threading.Event()
+        try:
+            return await asyncio.to_thread(self._scan_sync, context, cancellation)
+        except asyncio.CancelledError:
+            cancellation.set()
+            raise
 
-    def _scan_sync(self, context: ScanContext) -> ProviderResult:
+    def _scan_sync(
+        self,
+        context: ScanContext,
+        cancellation: threading.Event | None = None,
+    ) -> ProviderResult:
+        cancelled = cancellation or threading.Event()
+        expected = self._browser_clients(context)
+        current_identities = set(expected)
+        self.settled_browser_clients.intersection_update(current_identities)
+
+        best = self._collect(context)
+        new_identities = current_identities - self.settled_browser_clients
+        if new_identities:
+            expected_addresses = {expected[identity] for identity in new_identities}
+            best_coverage = len(best[2] & expected_addresses)
+            for delay in BROWSER_SETTLE_DELAYS:
+                if best_coverage == len(expected_addresses):
+                    break
+                # Chromium can publish its top-level frame before the native
+                # browser controls arrive on AT-SPI. The event listener is
+                # already active; give that bounded lazy tree construction a
+                # chance to finish before publishing the first browser rows.
+                if cancelled.wait(delay):
+                    break
+                candidate = self._collect(context)
+                coverage = len(candidate[2] & expected_addresses)
+                if coverage > best_coverage or (
+                    coverage == best_coverage and len(candidate[0]) > len(best[0])
+                ):
+                    best = candidate
+                    best_coverage = coverage
+            if not cancelled.is_set():
+                self.settled_browser_clients.update(new_identities)
+
+        items, objects, _browser_addresses = best
+        if not cancelled.is_set():
+            self.objects = objects
+        return ProviderResult(self.name, items)
+
+    @staticmethod
+    def _browser_clients(context: ScanContext) -> dict[tuple[str, int, str], str]:
+        out: dict[tuple[str, int, str], str] = {}
+        births: dict[int, str] = {}
+        for client in context.hypr_clients:
+            app_class = str(client.get("class") or client.get("initialClass") or "")
+            if not BROWSER_CLASS.search(app_class) or is_browser_app_mode(client):
+                continue
+            address = normalized_address(client.get("address"))
+            pid = int(client.get("pid") or 0)
+            if not address or pid <= 0:
+                continue
+            if pid not in births:
+                births[pid] = process_birth(pid)
+            out[(address, pid, births[pid])] = address
+        return out
+
+    def _collect(
+        self, context: ScanContext
+    ) -> tuple[list[Thing], dict[str, NativeTab], set[str]]:
         tree = AtspiTree()
         objects: dict[str, NativeTab] = {}
         items: list[Thing] = []
+        browser_addresses: set[str] = set()
         top_levels = tree.top_levels(context)
         for top in top_levels:
             app_class = str(top.client.get("class") or top.client.get("initialClass") or "")
+            # Browser app-mode windows are already actionable as exact managed
+            # windows. Their synthetic one-tab strip adds no distinct target,
+            # and must not leak into either browser or generic application tabs.
+            if is_browser_app_mode(top.client):
+                continue
             is_browser = bool(BROWSER_CLASS.search(app_class))
             tabs = tree.native_tabs(top, browser=is_browser)
             if not tabs:
                 continue
             address = normalized_address(top.client.get("address"))
+            if is_browser:
+                browser_addresses.add(address)
             pid = int(top.client.get("pid") or top.pid)
             birth = process_birth(pid)
             parent = self._window_parent_id(context, address)
@@ -368,8 +466,7 @@ class AtspiProvider:
                         },
                     )
                 )
-        self.objects = objects
-        return ProviderResult(self.name, items)
+        return items, objects, browser_addresses
 
     @staticmethod
     def _provider_name(app_class: str, browser: bool) -> str:

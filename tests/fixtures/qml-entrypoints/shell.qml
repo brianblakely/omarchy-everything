@@ -89,11 +89,27 @@ ShellRoot {
 
   function refreshTestTick() {
     if (refreshTestStage === 0) {
+      var barButton = findNamed(widgetObject, "everything-bar-button")
+      var barChevron = findNamed(widgetObject, "everything-bar-chevron")
       searchObject = findNamed(widgetObject, "everything-search")
       listObject = findNamed(widgetObject, "everything-results")
       keyCatcherObject = findNamed(widgetObject, "everything-key-catcher")
       if (!searchObject || !listObject || !keyCatcherObject) {
         failRefreshTest("controls not found")
+        return
+      }
+      if (!barButton || !barChevron) {
+        failRefreshTest("bar icon controls not found")
+        return
+      }
+      if (Math.abs(barChevron.centerErrorX) > 0.01) {
+        failRefreshTest("bar chevron is not horizontally centered: "
+          + barChevron.centerErrorX)
+        return
+      }
+      if (Math.abs(barButton.width - barButton.slotSize) > 0.01
+          || Math.abs(barButton.implicitWidth - barButton.slotSize) > 0.01) {
+        failRefreshTest("bar chevron changed the shell slot or hit target")
         return
       }
       serviceObject.items = rows(false, "one")
@@ -131,8 +147,19 @@ ShellRoot {
         return
       }
       keyCatcherObject.moveRequested(-1, 0)
-      if (listObject.currentIndex !== 16) {
-        failRefreshTest("shell horizontal movement was not routed")
+      var browserHeading = findNamed(widgetObject, "everything-section-browser-tab")
+      var selectedBrowserRow = typeof listObject.itemAtIndex === "function"
+        ? listObject.itemAtIndex(17) : null
+      if (listObject.currentIndex !== 17 || !widgetObject.groupCollapsed("browser-tab")
+          || !browserHeading || !browserHeading.collapsed
+          || (selectedBrowserRow && selectedBrowserRow.height !== 0)) {
+        failRefreshTest("shell left direction did not collapse the current group")
+        return
+      }
+      keyCatcherObject.moveRequested(1, 0)
+      if (listObject.currentIndex !== 17 || widgetObject.groupCollapsed("browser-tab")
+          || browserHeading.collapsed) {
+        failRefreshTest("shell right direction did not expand the current group")
         return
       }
       listObject.contentY = listObject.originY + widgetObject.rowTopAt(6) + 7
@@ -147,6 +174,7 @@ ShellRoot {
       }
       serviceObject.items = rows(true, "three")
     } else if (refreshTestStage === 4) {
+      if (widgetObject.resultUpdateInProgress) return
       if (searchObject.text !== "shared") {
         failRefreshTest("query changed")
         return
@@ -162,7 +190,10 @@ ShellRoot {
             + " after=" + selectedOffset + " index=" + listObject.currentIndex
             + " rowTop=" + widgetObject.rowVisualTop(listObject.currentIndex)
             + " contentY=" + listObject.contentY + " originY=" + listObject.originY
-            + " contentHeight=" + listObject.contentHeight + " height=" + listObject.height)
+            + " contentHeight=" + listObject.contentHeight + " height=" + listObject.height
+            + " savedOffset=" + widgetObject.savedSelectedOffset
+            + " survived=" + widgetObject.pendingSelectionSurvived
+            + " updating=" + widgetObject.resultUpdateInProgress)
           return
         }
       }

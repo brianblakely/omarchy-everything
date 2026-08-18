@@ -33,16 +33,23 @@ the wire schema and [provider behavior](providers.md) for adapter guarantees.
 ## Frontend ownership
 
 `Everything.qml` is one bar instance per monitor. It owns the panel, search
-focus, highlighted UUID, list scroll state, accessibility, and close-before-
-activation ordering. It uses the shell's `KeyboardPanel`, icon anchoring, and
-`PanelKeyCatcher`; shell navigation remains authoritative after search hands
-focus to the list. Each opening clears and focuses search, selects the first
-ranked thing, and resets the list to its scroll origin. UUID and visual-offset
+focus, highlighted UUID, collapsed-kind map, list scroll state, accessibility,
+and close-before-activation ordering. It uses the shell's `KeyboardPanel`, icon
+anchoring, and `PanelKeyCatcher`; shell navigation remains authoritative after
+search hands focus to the list. Vertical directions move between visible rows
+or collapsed headings, while horizontal directions collapse or expand the
+current group. A collapsed group retains its heading as the visible accessible
+focus target and never exposes a hidden row to activation or removal. Each
+opening clears and focuses search, expands every group, selects the first ranked
+thing, and resets the list to its scroll origin. UUID and visual-offset
 preservation applies only to refreshes while that opening remains active.
 Pointer-driven selection passes through the
 shell's `PointerMoveGate`; opening, keyboard navigation, and list mutations
 reset that gate so delegates appearing beneath a stationary pointer cannot
 change the highlighted thing.
+The bar chevron remains inside the shell's standard `BarIconButton` slot. Its
+painted bounds are optically centered without shifting the widget geometry,
+pointer target, or `KeyboardPanel` anchor.
 The presentation renders no status row; scan progress, empty searches, counts,
 and provider warnings never become panel messages. Activation failure can still
 use the shell's external notification path after the panel closes.
@@ -56,12 +63,16 @@ open and releases it when closed.
 metadata may change without replacing the visible list. A UI update is needed
 only when the ordered UUID sequence or a rendered trait changes; genuine list
 changes preserve the highlighted UUID and its visual offset when possible.
-It orders exact kind groups deterministically, then sorts rows naturally by
-their displayed metadata within each group. Windows use one preceding bucket
-for regular workspace rows and one trailing bucket for Scratchpad. Search
+It orders exact kind groups deterministically, with all Herdr groups before
+tmux, Herdr agents first within that family, and Herdr sessions last within it;
+then it sorts rows naturally by their displayed metadata within each group.
+Pure group-boundary and section-geometry helpers let QML skip hidden rows and
+restore scroll position without changing or duplicating provider results.
+Windows use one preceding bucket for regular workspace rows and one trailing
+bucket for Scratchpad. Search
 relevance, current state, and recency are tie-breakers only. Parent-derived
-Herdr metadata is resolved from the complete source set before query and
-hidden-ID filtering.
+tmux and Herdr metadata is resolved from the complete source set before query
+and hidden-ID filtering.
 Query tokens match only the title and the exact displayed group label; context,
 provider, badges, and provider search terms never enter matching.
 QML owns the accessible section headings and restores visual offset from the
@@ -80,8 +91,10 @@ or location before display. Badge normalization accepts both JavaScript arrays
 and Qt typed lists, including their comma-joined bridge representation, before
 the kind filter runs. The model indexes the complete public parent graph once
 per source update; both ranking and QML use that same index for breadcrumbs and
-Herdr workspace, tab, and pane metadata, while agent and session metadata retain
-their status semantics.
+tmux window/pane and Herdr workspace/tab/pane metadata. These child rows show
+only their immediate parent's title, while agent and session metadata retain
+their status semantics. Neovim buffer metadata bypasses status priority and
+uses the canonical containing directory supplied by its provider.
 
 ## Helper and provider ownership
 
@@ -138,7 +151,8 @@ Runtime authority and cleanup belong in [security](security.md).
 - This is an Omarchy Quattro plugin, not a Codex plugin. Current packaged
   interfaces are the only compatibility target.
 - Default shell placement, anchoring, panel lifecycle, and keyboard navigation
-  are preserved.
+  are preserved; optical icon corrections cannot move the shell slot, pointer
+  target, or panel anchor.
 - Provider commands use argv arrays with bounded timeouts and no shell
   interpolation. Untrusted runtime data is revalidated at activation.
 - Provider failures are isolated and nonfatal. Ambiguous native routing fails

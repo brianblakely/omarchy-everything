@@ -438,9 +438,7 @@ function contextMetadata(item, breadcrumb) {
   if (kind === "browser-tab" || kind === "app-tab") return provider
 
   var value = String(breadcrumb || (item && item.context) || "").trim()
-  if (kind === "tmux-window") value = value.replace(/\btmux window\s+/i, "")
-  else if (kind === "tmux-pane") value = value.replace(/\btmux pane\s+/i, "")
-  else if (kind === "terminal-pane"
+  if (kind === "terminal-pane"
            && normalized(item.context) === normalized(provider + " surface")) {
     var context = String(item.context || "")
     var prefix = value.slice(0, Math.max(0, value.length - context.length))
@@ -455,6 +453,14 @@ function contextMetadata(item, breadcrumb) {
 function vitalMetadata(item, breadcrumb, parentTitle) {
   if (!item) return ""
   var kind = String(item.kind || "")
+  if (kind === "neovim-buffer") {
+    var directory = String(item.context || "").trim()
+    return directory || String(item.provider || "")
+  }
+  if (kind === "tmux-window" || kind === "tmux-pane") {
+    var tmuxParent = String(parentTitle || "").trim()
+    return tmuxParent || String(item.provider || "")
+  }
   if (kind === "herdr-workspace" || kind === "herdr-tab" || kind === "herdr-pane") {
     var parent = String(parentTitle || "").trim()
     if (parent) return parent
@@ -582,14 +588,14 @@ function kindOrder(kind) {
     "app-tab": 2,
     "terminal-tab": 3,
     "terminal-pane": 4,
-    "tmux-session": 5,
-    "tmux-window": 6,
-    "tmux-pane": 7,
-    "herdr-agent": 8,
-    "herdr-workspace": 9,
-    "herdr-tab": 10,
-    "herdr-pane": 11,
-    "herdr-session": 12,
+    "herdr-agent": 5,
+    "herdr-workspace": 6,
+    "herdr-tab": 7,
+    "herdr-pane": 8,
+    "herdr-session": 9,
+    "tmux-session": 10,
+    "tmux-window": 11,
+    "tmux-pane": 12,
     "neovim-buffer": 13
   }
   var value = order[String(kind)]
@@ -691,19 +697,76 @@ function indexAfterRefresh(items, selectedUuid) {
   return 0
 }
 
-function sectionedRowTop(items, index, rowHeight, sectionHeight) {
+function groupStartIndex(items, index) {
+  var source = Array.isArray(items) ? items : []
+  if (source.length === 0 || index < 0) return -1
+  var bounded = Math.min(source.length - 1, Math.floor(Number(index || 0)))
+  var kind = String(source[bounded] && source[bounded].kind || "")
+  while (bounded > 0
+      && String(source[bounded - 1] && source[bounded - 1].kind || "") === kind)
+    bounded--
+  return bounded
+}
+
+function groupEndIndex(items, index) {
+  var source = Array.isArray(items) ? items : []
+  if (source.length === 0 || index < 0) return -1
+  var bounded = Math.min(source.length - 1, Math.floor(Number(index || 0)))
+  var kind = String(source[bounded] && source[bounded].kind || "")
+  while (bounded + 1 < source.length
+      && String(source[bounded + 1] && source[bounded + 1].kind || "") === kind)
+    bounded++
+  return bounded
+}
+
+function isCollapsedKind(collapsedKinds, kind) {
+  return collapsedKinds && collapsedKinds[String(kind)] === true
+}
+
+function adjacentNavigableIndex(items, index, direction, collapsedKinds) {
+  var source = Array.isArray(items) ? items : []
+  if (source.length === 0) return -1
+  var bounded = Math.max(0, Math.min(source.length - 1, Math.floor(Number(index || 0))))
+  var step = Number(direction || 0) < 0 ? -1 : (Number(direction || 0) > 0 ? 1 : 0)
+  if (step === 0) return bounded
+
+  var currentKind = String(source[bounded] && source[bounded].kind || "")
+  var cursor = bounded
+  if (isCollapsedKind(collapsedKinds, currentKind)) {
+    cursor = step > 0 ? groupEndIndex(source, bounded) : groupStartIndex(source, bounded)
+  }
+  cursor += step
+  if (cursor < 0 || cursor >= source.length) return bounded
+
+  var targetKind = String(source[cursor] && source[cursor].kind || "")
+  return isCollapsedKind(collapsedKinds, targetKind)
+    ? groupStartIndex(source, cursor) : cursor
+}
+
+function boundaryNavigableIndex(items, direction, collapsedKinds) {
+  var source = Array.isArray(items) ? items : []
+  if (source.length === 0) return -1
+  if (Number(direction || 0) < 0) return 0
+  var last = source.length - 1
+  var kind = String(source[last] && source[last].kind || "")
+  return isCollapsedKind(collapsedKinds, kind) ? groupStartIndex(source, last) : last
+}
+
+function sectionedRowTop(items, index, rowHeight, sectionHeight, collapsedKinds) {
   var source = Array.isArray(items) ? items : []
   if (source.length === 0 || index < 0) return 0
   var bounded = Math.min(source.length - 1, Math.floor(Number(index || 0)))
-  var sections = 0
+  var row = Math.max(1, Number(rowHeight || 1))
+  var section = Math.max(0, Number(sectionHeight || 0))
+  var top = 0
   var previous = ""
   for (var i = 0; i <= bounded; i++) {
     var current = String(source[i] && source[i].kind || "")
-    if (i === 0 || current !== previous) sections++
+    if (i === 0 || current !== previous) top += section
+    if (i < bounded && !isCollapsedKind(collapsedKinds, current)) top += row
     previous = current
   }
-  return bounded * Math.max(1, Number(rowHeight || 1))
-    + sections * Math.max(0, Number(sectionHeight || 0))
+  return top
 }
 
 function clampContentY(value, originY, contentHeight, viewHeight) {

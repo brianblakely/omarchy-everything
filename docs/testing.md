@@ -20,28 +20,33 @@ The suite performs:
   precedence, glyph-colored image fallback, generic fallback and Herdr agent
   glyphs, one-line row density, vital-metadata selection,
   JavaScript/Qt-list badge normalization, exclusion of redundant kind labels,
-  Herdr immediate-parent metadata, and absence of visual metadata pills;
+  tmux and Herdr immediate-parent metadata, Neovim containing-directory
+  metadata, and absence of visual metadata pills;
 - absence of panel scan, count, warning, and empty-result messages while
   automatic discovery continues;
-- every documented keyboard alias, focus-sensitive Delete/Backspace ownership,
-  safe selection after removal, stationary-pointer filtering, deliberate
-  pointer selection, and close-before-activation ordering;
+- every documented keyboard alias, horizontal group collapse/expand, vertical
+  skipping of hidden rows, focus-sensitive Delete/Backspace ownership, safe
+  selection after removal, stationary-pointer filtering, deliberate pointer
+  selection, and close-before-activation ordering;
 - argv injection rejection, command timeout/kill behavior, JSON-lines request
   correlation, malformed-request recovery, and stale-token rejection;
 - partial provider streaming, provider failure isolation, stale-row removal,
   and scan cancellation propagation;
 - AT-SPI state restoration without screen-reader writes, browser-family
-  matching, and exclusion of document-authored/tool tab strips;
+  matching, bounded first-seen browser settling, emitted browser-tab rows,
+  app-mode exclusion, native default-action activation, and exclusion of
+  document-authored/tool tab strips;
 - Hyprland mapped/hidden/group/scratchpad handling and Herdr protocol-20 shape;
 - Ghostty effective-binding filtering, 9+ virtualized rows, duplicate
   fingerprint occurrences, fail-closed mutations, and exact-address paired
   key-state construction;
 - Neovim's unique/ambiguous Herdr and multi-surface Ghostty routing;
 - QML lint and an offscreen Quickshell fixture that synchronously loads both
-  entrypoints and exercises two independent monitor leases. The fixture swaps
-  only compositor-dependent `KeyboardPanel` for an API-equivalent test double,
-  because Qt's offscreen backend cannot instantiate a layer-shell
-  `PanelWindow`;
+  entrypoints, verifies the chevron's painted horizontal center without
+  changing its shell slot or pointer target, and exercises two independent
+  monitor leases. The fixture swaps only compositor-dependent `KeyboardPanel`
+  for an API-equivalent test double, because Qt's offscreen backend cannot
+  instantiate a layer-shell `PanelWindow`;
 - `omarchy plugin validate .` against the installed current manifest schema.
 
 ## Live helper smoke test
@@ -87,8 +92,10 @@ single refresh followed by a visible stale notification.
 ### Browsers and native application tabs
 
 - Chromium/Chrome, Brave variants, Edge, Firefox, Zen, Vivaldi, Helium, and
-  LibreWolf where installed: multiple windows, private windows, PWAs, duplicate
-  titles, hidden tabs, and horizontal/vertical/custom native strips.
+  LibreWolf where installed: multiple windows, private windows, duplicate
+  titles, hidden tabs, and horizontal/vertical/custom native strips. Launch
+  app-mode/PWA windows through Omarchy and confirm they retain their managed
+  window rows but produce neither browser-tab nor application-tab rows.
 - A test page containing ARIA `tablist`/`tab` elements plus browser developer
   tools. Confirm neither page-authored nor tool tabs appear.
 - A GTK/Qt application with genuine native tabs and an editor/web app with DOM
@@ -123,7 +130,9 @@ single refresh followed by a visible stale notification.
   existing windows on another tab; standalone, tmux-nested, and Herdr-nested
   servers. Confirm a displayed buffer selects its first existing window and
   never starts a new terminal attach or remote UI; confirm `:hide buffer`
-  preserves modified buffers.
+  preserves modified buffers. Confirm every named buffer shows its canonical
+  containing directory and an unnamed buffer shows the editor working
+  directory, regardless of modified/loaded/displayed status badges.
 - Put nested Neovim instances in duplicate-cwd Herdr panes and multi-split
   Ghostty surfaces. Confirm inherited Herdr pane IDs disambiguate duplicate
   cwd values, and only hidden buffers with ambiguous hosts open a fresh
@@ -141,20 +150,30 @@ single refresh followed by a visible stale notification.
   cannot scroll and confirm only the highlight is preserved.
 - Populate several kinds at once. Confirm each exact kind has one accessible
   heading, groups remain in stable order, and ranking is preserved within each
-  group. Confirm Herdr agents precede every other Herdr group and Herdr sessions
-  follow all of them. Refresh while the selected row crosses a heading and
+  group. Confirm every Herdr group precedes the tmux groups, Herdr agents
+  precede every other Herdr group, and Herdr sessions follow the other Herdr
+  groups. Refresh while the selected row crosses a heading and
   confirm its visual offset is retained. Within a group, confirm the displayed
   metadata controls natural ordering, including `Workspace 2` before
   `Workspace 10`, Scratchpad after regular window workspaces, and Herdr child
-  rows ordered by their displayed parent name.
+  rows ordered by their displayed parent name. Confirm tmux windows show only
+  their session name and tmux panes show only their window name; neither value
+  includes native IDs, socket paths, cwd chains, or deeper ancestry.
+- Highlight a row in the middle of a group and press Left or H. Confirm its
+  rows collapse, its accessible heading keeps the highlight, vertical movement
+  skips directly to an adjacent visible row or collapsed heading, and removal
+  keys do nothing while the heading is selected. Press Right or L and confirm
+  the same row returns. Close and reopen the panel and confirm all groups are
+  expanded.
 - Confirm every row is one line with an icon on the left and exactly one
   status or context value on the right. Exercise long titles and paths, active
   states, modified buffers, detached sessions, and special workspaces; confirm
   a known window app uses Omarchy's Nerd Font glyph, an unmapped window image
   is recolored to the same selected/unselected foreground, Herdr agents use the
-  shell's agent robot, and unresolved windows use the window fallback. Confirm
-  text elides without overlap, kind labels never repeat in the right-side value,
-  and no pill-shaped metadata is rendered.
+  shell's agent robot, buffers show their containing directory, and unresolved
+  windows use the window fallback. Confirm text elides without overlap, kind
+  labels never repeat in the right-side value, and no pill-shaped metadata is
+  rendered.
 - Scroll to and highlight a middle result, close the panel, and open it again.
   Confirm the first result is highlighted and the list is at its scroll origin.
 - Open the panel while the pointer is stationary over a result. Confirm that
