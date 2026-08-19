@@ -4,6 +4,7 @@ List, search, and jump directly to every app, tab, buffer, agent... everything. 
 ![Everything screenshot](preview.png)
 ![Another Everything screenshot](preview2.png)
 ![Screenshot demonstrating search](preview3.png)
+![Settings panel](preview4.png)
 
 ## Install
 
