@@ -20,6 +20,10 @@ hl.unbind("SUPER + SLASH")
 o.bind("SUPER + SLASH", "Everything", "omarchy-shell shell toggle b.everything")
 ```
 
+# Configure
+
+Right-click the bar icon to choose which groups appear in Everything.
+
 ## Update
 
 ```bash
@@ -48,4 +52,5 @@ omarchy plugin remove b.everything
 | Navigation | `X`, `Backspace`, `Delete` | Hide the highlighted thing from the list until restart |
 | Navigation | `Tab`, `Shift+Tab` | Switch between search and the list |
 | Search | `Down`, `Tab` | Switch to list |
+| Settings panel | `Enter`, `Space` | Show or hide the selected group in results |
 | Other | `Escape` | Clear a search / Close Everything |

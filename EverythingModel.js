@@ -75,6 +75,82 @@ var ENTRY_ONLY_APP_GLYPHS = {
   "docker": "\uf21f"
 }
 
+// One catalog owns every supported result group and its presentation traits.
+// Keep order implicit in the array so headings, ranking, and the visibility
+// checklist cannot acquire separate ordering tables.
+var GROUP_CATALOG = [
+  { kind: "window", label: "Window", sectionLabel: "Windows", icon: "\uf2d0" },
+  { kind: "browser-tab", label: "Browser tab", sectionLabel: "Browser tabs", icon: "\uf0ac" },
+  { kind: "app-tab", label: "App tab", sectionLabel: "Application tabs", icon: "\uf24d" },
+  { kind: "terminal-tab", label: "Terminal tab", sectionLabel: "Terminal tabs", icon: "\uf120" },
+  { kind: "terminal-pane", label: "Terminal pane", sectionLabel: "Terminal panes", icon: "\uf0db" },
+  { kind: "herdr-agent", label: "Herdr agent", sectionLabel: "Herdr agents", icon: "󱚣" },
+  { kind: "herdr-workspace", label: "Herdr workspace", sectionLabel: "Herdr workspaces", icon: "\uf009" },
+  { kind: "herdr-tab", label: "Herdr tab", sectionLabel: "Herdr tabs", icon: "\uf24d" },
+  { kind: "herdr-pane", label: "Herdr pane", sectionLabel: "Herdr panes", icon: "\uf0db" },
+  { kind: "herdr-session", label: "Herdr session", sectionLabel: "Herdr sessions", icon: "\uf233" },
+  { kind: "tmux-session", label: "tmux session", sectionLabel: "tmux sessions", icon: "\uf233" },
+  { kind: "tmux-window", label: "tmux window", sectionLabel: "tmux windows", icon: "\uf24d" },
+  { kind: "tmux-pane", label: "tmux pane", sectionLabel: "tmux panes", icon: "\uf0db" },
+  { kind: "neovim-buffer", label: "Neovim buffer", sectionLabel: "Buffers", icon: "\uf1c9" }
+]
+
+var GROUP_BY_KIND = {}
+for (var groupIndex = 0; groupIndex < GROUP_CATALOG.length; groupIndex++)
+  GROUP_BY_KIND[GROUP_CATALOG[groupIndex].kind] = GROUP_CATALOG[groupIndex]
+
+function catalogGroup(kind) {
+  var value = String(kind || "")
+  return Object.prototype.hasOwnProperty.call(GROUP_BY_KIND, value)
+    ? GROUP_BY_KIND[value] : null
+}
+
+function supportedGroupCatalog() {
+  return GROUP_CATALOG.map(function(group, index) {
+    return {
+      kind: group.kind,
+      label: group.label,
+      sectionLabel: group.sectionLabel,
+      icon: group.icon,
+      order: index
+    }
+  })
+}
+
+function normalizeDisabledKinds(value) {
+  if (!Array.isArray(value) && (!value || typeof value === "string"
+      || typeof value.length !== "number")) {
+    return []
+  }
+  var sourceLength = Number(value.length)
+  if (!isFinite(sourceLength) || sourceLength < 0
+      || Math.floor(sourceLength) !== sourceLength || sourceLength > 4096) return []
+
+  var requested = {}
+  for (var itemIndex = 0; itemIndex < sourceLength; itemIndex++) {
+    var kind = value[itemIndex]
+    if (typeof kind === "string" && catalogGroup(kind)) requested[kind] = true
+  }
+
+  var normalizedKinds = []
+  for (var catalogIndex = 0; catalogIndex < GROUP_CATALOG.length; catalogIndex++) {
+    var catalogKind = GROUP_CATALOG[catalogIndex].kind
+    if (requested[catalogKind] === true) normalizedKinds.push(catalogKind)
+  }
+  return normalizedKinds
+}
+
+function disabledKindSet(value) {
+  var kinds = normalizeDisabledKinds(value)
+  var output = {}
+  for (var index = 0; index < kinds.length; index++) output[kinds[index]] = true
+  return output
+}
+
+function isKindDisabled(value, kind) {
+  return disabledKindSet(value)[String(kind || "")] === true
+}
+
 function normalized(value) {
   var text = String(value === undefined || value === null ? "" : value).toLowerCase()
   try {
@@ -321,43 +397,13 @@ function matchDesktopEntry(iconHints, entries) {
 }
 
 function kindLabel(kind) {
-  var labels = {
-    "window": "Window",
-    "browser-tab": "Browser tab",
-    "app-tab": "App tab",
-    "terminal-tab": "Terminal tab",
-    "terminal-pane": "Terminal pane",
-    "tmux-session": "tmux session",
-    "tmux-window": "tmux window",
-    "tmux-pane": "tmux pane",
-    "herdr-session": "Herdr session",
-    "herdr-workspace": "Herdr workspace",
-    "herdr-tab": "Herdr tab",
-    "herdr-pane": "Herdr pane",
-    "herdr-agent": "Herdr agent",
-    "neovim-buffer": "Neovim buffer"
-  }
-  return labels[String(kind)] || String(kind || "Thing")
+  var group = catalogGroup(kind)
+  return group ? group.label : String(kind || "Thing")
 }
 
 function kindIcon(kind) {
-  var icons = {
-    "window": "\uf2d0",
-    "browser-tab": "\uf0ac",
-    "app-tab": "\uf24d",
-    "terminal-tab": "\uf120",
-    "terminal-pane": "\uf0db",
-    "tmux-session": "\uf233",
-    "tmux-window": "\uf24d",
-    "tmux-pane": "\uf0db",
-    "herdr-session": "\uf233",
-    "herdr-workspace": "\uf009",
-    "herdr-tab": "\uf24d",
-    "herdr-pane": "\uf0db",
-    "herdr-agent": "󱚣",
-    "neovim-buffer": "\uf1c9"
-  }
-  return icons[String(kind)] || "\uf128"
+  var group = catalogGroup(kind)
+  return group ? group.icon : "\uf128"
 }
 
 function isKindMetadata(value) {
@@ -552,44 +598,13 @@ function naturalCompare(left, right) {
 }
 
 function kindSectionLabel(kind) {
-  var labels = {
-    "window": "Windows",
-    "browser-tab": "Browser tabs",
-    "app-tab": "Application tabs",
-    "terminal-tab": "Terminal tabs",
-    "terminal-pane": "Terminal panes",
-    "tmux-session": "tmux sessions",
-    "tmux-window": "tmux windows",
-    "tmux-pane": "tmux panes",
-    "herdr-session": "Herdr sessions",
-    "herdr-workspace": "Herdr workspaces",
-    "herdr-tab": "Herdr tabs",
-    "herdr-pane": "Herdr panes",
-    "herdr-agent": "Herdr agents",
-    "neovim-buffer": "Buffers"
-  }
-  return labels[String(kind)] || "Other things"
+  var group = catalogGroup(kind)
+  return group ? group.sectionLabel : "Other things"
 }
 
 function kindOrder(kind) {
-  var order = {
-    "window": 0,
-    "browser-tab": 1,
-    "app-tab": 2,
-    "terminal-tab": 3,
-    "terminal-pane": 4,
-    "herdr-agent": 5,
-    "herdr-workspace": 6,
-    "herdr-tab": 7,
-    "herdr-pane": 8,
-    "herdr-session": 9,
-    "tmux-session": 10,
-    "tmux-window": 11,
-    "tmux-pane": 12,
-    "neovim-buffer": 13
-  }
-  var value = order[String(kind)]
-  return value === undefined ? 1000 : value
+  var group = catalogGroup(kind)
+  return group ? GROUP_CATALOG.indexOf(group) : 1000
 }
 
 function rankedEntry(item, query, sourceIndex, relations) {
@@ -631,15 +646,17 @@ function rankedEntry(item, query, sourceIndex, relations) {
   }
 }
 
-function rank(items, query, hiddenIds) {
+function rank(items, query, hiddenIds, disabledKinds) {
   var source = Array.isArray(items) ? items : []
   var hidden = hiddenIds || {}
+  var disabled = disabledKindSet(disabledKinds)
   var normalizedQuery = normalized(query)
   var relations = relationIndex(source)
   var ranked = []
   for (var i = 0; i < source.length; i++) {
     var item = source[i]
-    if (!item || !item.id || hidden[String(item.id)] === true) continue
+    if (!item || !item.id || hidden[String(item.id)] === true
+        || disabled[String(item.kind || "")] === true) continue
     var entry = rankedEntry(item, normalizedQuery, i, relations)
     if (entry) ranked.push(entry)
   }

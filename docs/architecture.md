@@ -9,9 +9,9 @@ Native integrations remain behind provider adapters.
 | Layer | Owner | Inputs | Outputs |
 | --- | --- | --- | --- |
 | Plugin registration | `manifest.json` | Omarchy plugin schema | Service and bar-widget entry points |
-| Per-monitor presentation | `Everything.qml` | Shell service items and user input | Search, selection, hiding, activation requests |
-| Pure presentation model | `EverythingModel.js` | Item arrays, query, hidden IDs | Ranked arrays and reconciliation decisions |
-| Shell-wide state | `Service.qml` | Panel leases and helper messages | Merged items, transient hidden IDs, helper requests |
+| Per-monitor presentation | `Everything.qml` | Shell service items, injected widget settings, and user input | Search, selection, hiding, persisted group visibility, activation requests |
+| Pure presentation model | `EverythingModel.js` | Item arrays, query, hidden IDs, disabled kinds | Supported group catalog, ranked arrays, and reconciliation decisions |
+| Shell-wide state | `Service.qml` | Results leases and helper messages | Merged items, transient hidden IDs, helper requests |
 | Process boundary | `helper/everything_helper.py`, `everything/server.py` | Versioned JSON lines | Correlated snapshots, activation results, nonfatal errors |
 | Discovery core | `everything/discovery.py`, `everything/model.py` | Provider results | Deduplicated things and opaque activation tokens |
 | Native adapters | `everything/providers/` | Current local APIs and validated runtime metadata | Actionable things, routing metadata, exact activation |
@@ -32,10 +32,11 @@ the wire schema and [provider behavior](providers.md) for adapter guarantees.
 
 ## Frontend ownership
 
-`Everything.qml` is one bar instance per monitor. It owns the panel, search
-focus, highlighted UUID, collapsed-kind map, list scroll state, accessibility,
-and close-before-activation ordering. It uses the shell's `KeyboardPanel`, icon
-anchoring, and `PanelKeyCatcher`; shell navigation remains authoritative after
+`Everything.qml` is one bar instance per monitor. It owns the panel mode,
+search focus, highlighted UUID, collapsed-kind map, checklist selection, list
+scroll state, accessibility, and close-before-activation ordering. It uses the
+shell's `KeyboardPanel`, icon anchoring, and `PanelKeyCatcher`; shell navigation
+remains authoritative after
 search hands focus to the list. Vertical directions move between visible rows
 or collapsed headings, while horizontal directions collapse or expand the
 current group. A collapsed group retains its heading as the visible accessible
@@ -56,25 +57,43 @@ The presentation renders no status row; scan progress, empty searches, counts,
 and provider warnings never become panel messages. Activation failure can still
 use the shell's external notification path after the panel closes.
 
+The primary bar action opens or toggles results. Right-click opens or toggles a
+checklist containing the complete supported group catalog, and either action
+switches an already-open popup in place when it targets the other mode. The
+checklist is useful without discovery, so only results mode owns a helper
+lease. Its normalized `disabledKinds: string[]`, containing exact protocol kind
+identifiers, is global widget configuration:
+the active instance updates its injected `settings` optimistically and writes
+the merged entry through the shell's `updateEntryInline` API. The shell owns
+`shell.json` persistence and injects the change into every monitor instance.
+Missing, malformed, duplicate, and unknown values are ignored; consequently a
+new catalog group is enabled until explicitly disabled. This persistent filter
+is independent of per-opening group collapse and the service's transient
+per-thing hidden IDs.
+
 `Service.qml` is shell-wide. It owns helper leases, request correlation,
 provider partials, activation-token lookup, transient hidden IDs, polling, and
-helper restart/stop behavior. A panel acquires a stable instance lease while
-open and releases it when closed.
+helper restart/stop behavior. A bar instance acquires its stable lease while
+its results mode is open and releases it when results close or switch to the
+checklist.
 
 `EverythingModel.js` stays pure and free of QML object references. Source
 metadata may change without replacing the visible list. A UI update is needed
 only when the ordered UUID sequence or a rendered trait changes; genuine list
 changes preserve the highlighted UUID and its visual offset when possible.
-It orders exact kind groups deterministically, with all Herdr groups before
-tmux, Herdr agents first within that family, and Herdr sessions last within it;
-then it sorts rows naturally by their displayed metadata within each group.
+Its canonical catalog owns all supported kind identifiers, singular labels,
+section labels, glyphs, and display order. It orders exact kind groups
+deterministically, with all Herdr groups before tmux, Herdr agents first within
+that family, and Herdr sessions last within it; then it sorts rows naturally by
+their displayed metadata within each group.
 Pure group-boundary and section-geometry helpers let QML skip hidden rows and
 restore scroll position without changing or duplicating provider results.
 Windows use one preceding bucket for regular workspace rows and one trailing
-bucket for Scratchpad. Search
-relevance, current state, and recency are tie-breakers only. Parent-derived
-tmux and Herdr metadata is resolved from the complete source set before query
-and hidden-ID filtering.
+bucket for Scratchpad. Search relevance, current state, and recency are
+tie-breakers only. Parent-derived tmux and Herdr metadata is resolved from the
+complete source set before disabled-kind, query, and hidden-ID filtering, so
+disabling a parent group cannot remove metadata needed by an enabled child
+group.
 The normalized query must match one case-insensitive contiguous substring of
 either the title or exact displayed group label. It cannot be split across
 fields; context, provider, badges, and provider search terms never enter
@@ -136,12 +155,14 @@ activation identities.
 
 ## Lifecycle and state
 
-- The helper exists only while at least one panel lease or activation is
-  active. Closing the last panel requests shutdown after pending activation.
+- The helper exists only while at least one results-mode lease or activation
+  is active. Closing or switching away from the last results panel requests
+  shutdown after pending activation; checklist-only popups never start it.
 - Hyprland rows can arrive before slower adapters; `Service.qml` merges
   provider partials rather than replacing unrelated providers.
 - Hidden IDs, warnings, provider snapshots, tokens, and Ghostty cache are
-  memory-only and reset with the plugin or shell process.
+  memory-only and reset with the plugin or shell process. Disabled kinds are
+  instead shell-owned widget settings and survive plugin and shell restarts.
 - The panel closes before activation is dispatched so the shell releases its
   keyboard grab before another local surface receives focus.
 

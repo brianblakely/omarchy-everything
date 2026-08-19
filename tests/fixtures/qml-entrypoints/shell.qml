@@ -7,9 +7,15 @@ ShellRoot {
   readonly property string sourceDir: Quickshell.env("EVERYTHING_SOURCE_DIR")
   property var serviceObject: null
   property var widgetObject: null
+  property var widgetPeer: null
   property var searchObject: null
   property var listObject: null
+  property var groupListObject: null
   property var keyCatcherObject: null
+  property int persistenceCalls: 0
+  property var persistedSettings: ({})
+  property int tabSwitchCalls: 0
+  property int lastTabDirection: 0
   property int refreshTestStage: 0
   property string selectedBeforeRefresh: ""
   property string shortListSelection: ""
@@ -232,6 +238,7 @@ ShellRoot {
       shortListSelection = resultId(listObject.currentIndex)
       serviceObject.items = rows(true, "six").slice(0, 3)
     } else if (refreshTestStage === 7) {
+      if (widgetObject.resultUpdateInProgress) return
       if (resultId(listObject.currentIndex) !== shortListSelection) {
         failRefreshTest("short list selection changed")
         return
@@ -293,7 +300,145 @@ ShellRoot {
         failRefreshTest("pointer movement did not change the highlight")
         return
       }
+      widgetObject.focusList(17)
       widgetObject.close()
+    } else if (refreshTestStage === 11) {
+      var groupButton = findNamed(widgetObject, "everything-bar-button")
+      groupListObject = findNamed(widgetObject, "everything-groups")
+      if (!groupButton || !groupListObject) {
+        failRefreshTest("group controls not found")
+        return
+      }
+      groupButton.triggerPress(Qt.RightButton)
+      if (!widgetObject.opened || widgetObject.popupMode !== widgetObject.groupsMode) {
+        failRefreshTest("right-click did not open the group checklist")
+        return
+      }
+      if (serviceObject.leaseCount !== 0) {
+        failRefreshTest("group checklist acquired a helper lease")
+        return
+      }
+    } else if (refreshTestStage === 12) {
+      var expectedKinds = [
+        "window", "browser-tab", "app-tab", "terminal-tab", "terminal-pane",
+        "herdr-agent", "herdr-workspace", "herdr-tab", "herdr-pane", "herdr-session",
+        "tmux-session", "tmux-window", "tmux-pane", "neovim-buffer"
+      ]
+      if (groupListObject.count !== expectedKinds.length) {
+        failRefreshTest("group checklist did not contain all supported rows")
+        return
+      }
+      for (var kindIndex = 0; kindIndex < expectedKinds.length; kindIndex++) {
+        groupListObject.positionViewAtIndex(kindIndex, ListView.Contain)
+        if (typeof groupListObject.forceLayout === "function") groupListObject.forceLayout()
+        var groupRow = typeof groupListObject.itemAtIndex === "function"
+          ? groupListObject.itemAtIndex(kindIndex) : null
+        if (!groupRow || String(groupRow.objectName) !== "everything-group-" + expectedKinds[kindIndex]
+            || !groupRow.checked) {
+          failRefreshTest("missing or unchecked default group " + expectedKinds[kindIndex]
+            + ": row=" + String(!!groupRow)
+            + " checked=" + String(groupRow ? groupRow.checked : "missing"))
+          return
+        }
+      }
+      widgetObject.resetGroupChecklist()
+      keyCatcherObject.moveRequested(0, 1)
+      if (groupListObject.currentIndex !== 1) {
+        failRefreshTest("group Down navigation did not select the next row")
+        return
+      }
+      keyCatcherObject.activateRequested()
+      if (!widgetObject.kindDisabled("browser-tab") || persistenceCalls !== 1) {
+        failRefreshTest("group Enter did not persist the selected checkbox")
+        return
+      }
+    } else if (refreshTestStage === 13) {
+      if (widgetObject.rankedItems.length !== 30
+          || listObject.currentIndex !== 0) {
+        failRefreshTest("disabling the selected result group was not applied safely")
+        return
+      }
+      if (!widgetPeer.kindDisabled("browser-tab")
+          || !persistedSettings.disabledKinds
+          || persistedSettings.disabledKinds.indexOf("browser-tab") < 0) {
+        failRefreshTest("disabled kinds did not synchronize to the other monitor")
+        return
+      }
+      var terminalRow = findNamed(widgetObject, "everything-group-terminal-pane")
+      if (!terminalRow || typeof terminalRow.activate !== "function") {
+        failRefreshTest("group pointer route was unavailable")
+        return
+      }
+      terminalRow.activate()
+    } else if (refreshTestStage === 14) {
+      if (widgetObject.rankedItems.length !== 20
+          || !widgetObject.kindDisabled("terminal-pane")
+          || persistenceCalls !== 2) {
+        failRefreshTest("pointer checkbox toggle did not filter immediately")
+        return
+      }
+      var resultButton = findNamed(widgetObject, "everything-bar-button")
+      resultButton.triggerPress(Qt.LeftButton)
+      if (!widgetObject.opened || widgetObject.popupMode !== widgetObject.resultsMode
+          || serviceObject.leaseCount !== 1) {
+        failRefreshTest("left-click did not switch in place to leased results")
+        return
+      }
+    } else if (refreshTestStage === 15) {
+      var settingsButton = findNamed(widgetObject, "everything-bar-button")
+      settingsButton.triggerPress(Qt.RightButton)
+      if (!widgetObject.opened || widgetObject.popupMode !== widgetObject.groupsMode
+          || serviceObject.leaseCount !== 0) {
+        failRefreshTest("right-click did not switch in place and release the lease")
+        return
+      }
+      keyCatcherObject.tabRequested(1)
+      if (tabSwitchCalls !== 1 || lastTabDirection !== 1) {
+        failRefreshTest("group Tab did not use shell-owned panel navigation")
+        return
+      }
+      keyCatcherObject.closeRequested()
+    } else if (refreshTestStage === 16) {
+      if (widgetObject.opened || serviceObject.leaseCount !== 0) {
+        failRefreshTest("group Escape did not close without a lease")
+        return
+      }
+      var reopenButton = findNamed(widgetObject, "everything-bar-button")
+      reopenButton.triggerPress(Qt.RightButton)
+    } else if (refreshTestStage === 17) {
+      var browserRow = findNamed(widgetObject, "everything-group-browser-tab")
+      var paneRow = findNamed(widgetObject, "everything-group-terminal-pane")
+      if (!browserRow || browserRow.checked || !paneRow || paneRow.checked) {
+        failRefreshTest("disabled checkboxes did not persist across panel reopen")
+        return
+      }
+      browserRow.activate()
+      paneRow.activate()
+    } else if (refreshTestStage === 18) {
+      if (widgetObject.rankedItems.length !== 40
+          || widgetObject.disabledKinds.length !== 0
+          || widgetPeer.disabledKinds.length !== 0) {
+        failRefreshTest("rechecking groups did not restore results on every monitor")
+        return
+      }
+      var closeGroupsButton = findNamed(widgetObject, "everything-bar-button")
+      closeGroupsButton.triggerPress(Qt.RightButton)
+      if (widgetObject.opened || serviceObject.leaseCount !== 0) {
+        failRefreshTest("second right-click did not close the checklist")
+        return
+      }
+      closeGroupsButton.triggerPress(Qt.LeftButton)
+      if (!widgetObject.opened || serviceObject.leaseCount !== 1) {
+        failRefreshTest("left-click did not open results with a lease")
+        return
+      }
+    } else if (refreshTestStage === 19) {
+      var closeResultsButton = findNamed(widgetObject, "everything-bar-button")
+      closeResultsButton.triggerPress(Qt.LeftButton)
+      if (widgetObject.opened || serviceObject.leaseCount !== 0) {
+        failRefreshTest("second left-click did not close results and release the lease")
+        return
+      }
       console.log("EVERYTHING_REFRESH_OK")
       refreshTestTimer.stop()
       Qt.quit()
@@ -336,9 +481,23 @@ ShellRoot {
       Qt.quit()
       return
     }
-    widgetObject = widgetComponent.createObject(host, { bar: mockBar, moduleName: "b.everything" })
+    widgetObject = widgetComponent.createObject(host, {
+      bar: mockBar,
+      moduleName: "b.everything",
+      settings: ({})
+    })
     if (!widgetObject) {
       console.error("EVERYTHING_CREATE_ERROR widget: " + widgetComponent.errorString())
+      Qt.quit()
+      return
+    }
+    widgetPeer = widgetComponent.createObject(host, {
+      bar: mockPeerBar,
+      moduleName: "b.everything",
+      settings: ({})
+    })
+    if (!widgetPeer) {
+      console.error("EVERYTHING_CREATE_ERROR widget-peer: " + widgetComponent.errorString())
       Qt.quit()
       return
     }
@@ -351,6 +510,14 @@ ShellRoot {
   QtObject {
     id: mockShell
     function serviceFor(id) { return id === "b.everything" ? root.serviceObject : null }
+    function updateEntryInline(moduleName, settings) {
+      if (moduleName !== "b.everything") return false
+      root.persistenceCalls += 1
+      root.persistedSettings = JSON.parse(JSON.stringify(settings))
+      if (root.widgetObject) root.widgetObject.settings = root.persistedSettings
+      if (root.widgetPeer) root.widgetPeer.settings = root.persistedSettings
+      return true
+    }
   }
 
   QtObject {
@@ -370,6 +537,33 @@ ShellRoot {
     function unregisterClickTarget(target) { clickTargets = clickTargets.filter(function(value) { return value !== target }) }
     function requestPopout(owner) { activePopout = owner }
     function releasePopout(owner) { if (activePopout === owner) activePopout = null }
+    function switchPanelFrom(_owner, direction) {
+      root.tabSwitchCalls += 1
+      root.lastTabDirection = direction
+      return false
+    }
+    function showTooltip(_target, _text) {}
+    function hideTooltip(_target) {}
+  }
+
+  QtObject {
+    id: mockPeerBar
+    property var shell: mockShell
+    property string position: "top"
+    property string fontFamily: "sans-serif"
+    property color foreground: "#ffffff"
+    property color barForeground: "#ffffff"
+    property color urgent: "#ff5555"
+    property bool vertical: false
+    property bool foregroundAnimationEnabled: false
+    property int barSize: 36
+    property var activePopout: null
+    property var clickTargets: []
+    function registerClickTarget(target) { clickTargets = clickTargets.concat([target]) }
+    function unregisterClickTarget(target) { clickTargets = clickTargets.filter(function(value) { return value !== target }) }
+    function requestPopout(owner) { activePopout = owner }
+    function releasePopout(owner) { if (activePopout === owner) activePopout = null }
+    function switchPanelFrom(_owner, _direction) { return false }
     function showTooltip(_target, _text) {}
     function hideTooltip(_target) {}
   }

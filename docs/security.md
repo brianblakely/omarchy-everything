@@ -134,4 +134,8 @@ ordinal, and is rebuilt before activation.
 
 There is no runtime database or cache file. Provider snapshots, opaque-token
 secrets, helper warnings, monitor leases, Ghostty scan cache, and hidden IDs
-exist only in memory. Plugin or shell reload resets them.
+exist only in memory. Plugin or shell reload resets them. The sole persistent
+Everything-owned preference is the normalized `disabledKinds` string array in
+the widget's existing `shell.json` entry. QML writes it through the shell's
+`updateEntryInline` API; it contains only supported public kind identifiers and
+never discovered thing data, native identities, titles, paths, or tokens.

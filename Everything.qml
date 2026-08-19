@@ -22,12 +22,20 @@ Panel {
   readonly property var desktopEntries: DesktopEntries.applications.values || []
   readonly property var itemRelations: Model.relationIndex(
     everythingService ? everythingService.items : [])
+  readonly property var supportedGroups: Model.supportedGroupCatalog()
+  readonly property var disabledKinds: Model.normalizeDisabledKinds(
+    root.setting("disabledKinds", []))
   readonly property color foreground: root.bar ? root.bar.foreground : Color.foreground
   readonly property color dimForeground: Qt.darker(foreground, 1.55)
   readonly property real rowHeight: Style.font.body * 1.5
   readonly property int sectionHeight: Style.space(24)
+  readonly property int groupChecklistRowHeight: Style.space(36)
+  readonly property string resultsMode: "results"
+  readonly property string groupsMode: "groups"
+  readonly property bool resultsModeOpen: root.opened && popupMode === resultsMode
   property var rankedItems: []
   property var collapsedKinds: ({})
+  property string popupMode: resultsMode
   property string selectedItemUuid: ""
   property real savedSelectedOffset: 0
   property bool savedListFocus: false
@@ -47,6 +55,113 @@ Panel {
   function disarmPointer() {
     pointerCursorActive = false
     pointerMoveGate.reset()
+  }
+
+  function kindDisabled(kind) {
+    return disabledKinds.indexOf(String(kind || "")) >= 0
+  }
+
+  function persistDisabledKinds(value) {
+    var nextKinds = Model.normalizeDisabledKinds(value)
+    if (Model.sameStringList(disabledKinds, nextKinds)) return
+
+    var entry = { id: root.moduleName }
+    for (var key in root.settings) if (key !== "id") entry[key] = root.settings[key]
+    entry.disabledKinds = nextKinds
+
+    // Update this monitor immediately. The shell write then injects the same
+    // settings object into every live monitor instance without rebuilding it.
+    root.settings = entry
+    if (root.bar && root.bar.shell
+        && typeof root.bar.shell.updateEntryInline === "function")
+      root.bar.shell.updateEntryInline(root.moduleName, entry)
+  }
+
+  function setKindEnabled(kind, enabled) {
+    var value = String(kind || "")
+    var shouldDisable = enabled !== true
+    var catalogKind = false
+    for (var index = 0; index < supportedGroups.length; index++) {
+      if (supportedGroups[index].kind === value) {
+        catalogKind = true
+        break
+      }
+    }
+    if (!catalogKind || kindDisabled(value) === shouldDisable) return
+
+    var nextKinds = disabledKinds.slice()
+    var disabledIndex = nextKinds.indexOf(value)
+    if (!shouldDisable && disabledIndex >= 0) nextKinds.splice(disabledIndex, 1)
+    else if (shouldDisable && disabledIndex < 0) nextKinds.push(value)
+    persistDisabledKinds(nextKinds)
+  }
+
+  function toggleKindVisibility(kind) {
+    setKindEnabled(kind, kindDisabled(kind))
+  }
+
+  function resetGroupChecklist() {
+    groupList.currentIndex = supportedGroups.length > 0 ? 0 : -1
+    groupList.contentY = groupList.originY
+    Qt.callLater(function() {
+      if (root.opened && root.popupMode === root.groupsMode)
+        groupList.forceActiveFocus()
+    })
+  }
+
+  function enterPopupMode(mode) {
+    var wanted = mode === groupsMode ? groupsMode : resultsMode
+    if (popupMode === wanted) return
+    popupMode = wanted
+    if (!root.opened) return
+
+    if (wanted === groupsMode) {
+      resetGroupChecklist()
+    } else {
+      searchField.text = ""
+      if (appLibrary && typeof appLibrary.refreshIcons === "function")
+        appLibrary.refreshIcons()
+      rebuildRankedItems()
+      resetResultsForOpen()
+    }
+  }
+
+  function togglePopupMode(mode) {
+    var wanted = mode === groupsMode ? groupsMode : resultsMode
+    if (root.opened && popupMode === wanted) {
+      root.close()
+      return
+    }
+    if (root.opened) {
+      enterPopupMode(wanted)
+      return
+    }
+    popupMode = wanted
+    root.open()
+  }
+
+  function setGroupChecklistIndex(index) {
+    if (supportedGroups.length <= 0) {
+      groupList.currentIndex = -1
+      return
+    }
+    var bounded = Math.max(0, Math.min(supportedGroups.length - 1,
+      Math.floor(Number(index || 0))))
+    groupList.currentIndex = bounded
+    groupList.positionViewAtIndex(bounded, ListView.Contain)
+  }
+
+  function moveGroupChecklist(delta) {
+    if (supportedGroups.length <= 0 || Number(delta || 0) === 0) return
+    var current = groupList.currentIndex < 0 ? 0 : groupList.currentIndex
+    setGroupChecklistIndex(current + (delta < 0 ? -1 : 1))
+    groupList.forceActiveFocus()
+  }
+
+  function toggleCurrentGroupVisibility() {
+    var index = groupList.currentIndex
+    if (index < 0 || index >= supportedGroups.length) return
+    toggleKindVisibility(supportedGroups[index].kind)
   }
 
   function selectFromPointer(index, item, mouse) {
@@ -300,7 +415,8 @@ Panel {
     var nextItems = Model.rank(
       everythingService ? everythingService.items : [],
       searchField.text,
-      everythingService ? everythingService.hiddenIds : {})
+      everythingService ? everythingService.hiddenIds : {},
+      disabledKinds)
     if (Model.sameRankedItems(rankedItems, nextItems)) return
     if (!resultUpdateInProgress) rememberResultState()
     disarmPointer()
@@ -421,21 +537,31 @@ Panel {
 
   onOpenedChanged: {
     if (root.opened) {
-      searchField.text = ""
-      if (appLibrary && typeof appLibrary.refreshIcons === "function")
-        appLibrary.refreshIcons()
-      rebuildRankedItems()
-      resetResultsForOpen()
-      if (everythingService) everythingService.acquire(instanceKey)
-    } else if (everythingService) {
-      everythingService.release(instanceKey)
+      if (popupMode === groupsMode) {
+        resetGroupChecklist()
+      } else {
+        searchField.text = ""
+        if (appLibrary && typeof appLibrary.refreshIcons === "function")
+          appLibrary.refreshIcons()
+        rebuildRankedItems()
+        resetResultsForOpen()
+      }
+    } else {
+      popupMode = resultsMode
     }
   }
 
+  onResultsModeOpenChanged: {
+    if (!everythingService) return
+    if (resultsModeOpen) everythingService.acquire(instanceKey)
+    else everythingService.release(instanceKey)
+  }
+
   onEverythingServiceChanged: {
-    if (root.opened && everythingService) everythingService.acquire(instanceKey)
+    if (resultsModeOpen && everythingService) everythingService.acquire(instanceKey)
     scheduleRankedItems()
   }
+  onDisabledKindsChanged: scheduleRankedItems()
   Component.onCompleted: scheduleRankedItems()
   Component.onDestruction: if (everythingService) everythingService.release(instanceKey)
 
@@ -487,17 +613,20 @@ Panel {
     active: root.opened
     tooltipText: "Everything"
     activeFocusOnTab: true
-    Keys.onReturnPressed: root.toggle()
-    Keys.onEnterPressed: root.toggle()
-    Keys.onSpacePressed: root.toggle()
-    onPressed: function(_buttonCode) { root.toggle() }
+    Keys.onReturnPressed: root.togglePopupMode(root.resultsMode)
+    Keys.onEnterPressed: root.togglePopupMode(root.resultsMode)
+    Keys.onSpacePressed: root.togglePopupMode(root.resultsMode)
+    onPressed: function(buttonCode) {
+      root.togglePopupMode(buttonCode === Qt.RightButton
+        ? root.groupsMode : root.resultsMode)
+    }
 
     Accessible.role: Accessible.Button
     Accessible.name: "Open Everything"
-    Accessible.description: "Search windows, tabs, panes, sessions, agents, and buffers"
+    Accessible.description: "Search things with the primary action; choose visible groups with right-click"
     Accessible.focusable: true
     Accessible.focused: activeFocus
-    Accessible.onPressAction: root.toggle()
+    Accessible.onPressAction: root.togglePopupMode(root.resultsMode)
 
     Rectangle {
       anchors.fill: parent
@@ -516,7 +645,7 @@ Panel {
     owner: root
     bar: root.bar
     open: root.opened
-    focusTarget: searchField
+    focusTarget: root.popupMode === root.groupsMode ? groupList : searchField
     contentWidth: popup.fittedContentWidth(Style.space(620))
     contentHeight: popup.cappedContentHeight(Style.space(620))
 
@@ -524,18 +653,28 @@ Panel {
       id: keyCatcher
       objectName: "everything-key-catcher"
       anchors.fill: parent
-      blocked: searchField.activeFocus
+      blocked: root.popupMode === root.resultsMode && searchField.activeFocus
 
       onMoveRequested: function(dx, dy) {
-        if (dy !== 0) root.moveSelection(dy)
+        if (root.popupMode === root.groupsMode) {
+          if (dy !== 0) root.moveGroupChecklist(dy)
+        } else if (dy !== 0) root.moveSelection(dy)
         else if (dx < 0) root.collapseCurrentGroup()
         else if (dx > 0) root.expandCurrentGroup()
       }
-      onActivateRequested: root.activateCurrent()
-      onCloseRequested: root.handleEscape()
-      onDeleteRequested: root.hideAt(resultList.currentIndex)
+      onActivateRequested: {
+        if (root.popupMode === root.groupsMode) root.toggleCurrentGroupVisibility()
+        else root.activateCurrent()
+      }
+      onCloseRequested: {
+        if (root.popupMode === root.groupsMode) root.close()
+        else root.handleEscape()
+      }
+      onDeleteRequested: if (root.popupMode === root.resultsMode)
+        root.hideAt(resultList.currentIndex)
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(text) {
+        if (root.popupMode !== root.resultsMode) return
         if (text === "/") root.focusSearch()
         else if (text === "g") root.focusBoundary(-1)
         else if (text === "G") root.focusBoundary(1)
@@ -545,7 +684,8 @@ Panel {
         id: content
         anchors.fill: parent
         Accessible.role: Accessible.Pane
-        Accessible.name: "Everything search and switch panel"
+        Accessible.name: root.popupMode === root.groupsMode
+          ? "Everything group visibility panel" : "Everything search and switch panel"
 
       TextField {
         id: searchField
@@ -553,6 +693,8 @@ Panel {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
+        visible: root.popupMode === root.resultsMode
+        enabled: visible
         placeholderText: "Search everything…"
         foreground: root.foreground
         activeFocusOnTab: true
@@ -587,6 +729,8 @@ Panel {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.bottomMargin: Style.space(6)
+        visible: root.popupMode === root.resultsMode
+        enabled: visible
         clip: true
         model: root.rankedItems
         currentIndex: -1
@@ -827,6 +971,120 @@ Panel {
               root.pointerCursorActive = true
               root.activateAt(row.index)
             }
+          }
+        }
+      }
+
+      ListView {
+        id: groupList
+        objectName: "everything-groups"
+        anchors.fill: parent
+        anchors.topMargin: Style.space(4)
+        anchors.bottomMargin: Style.space(6)
+        visible: root.popupMode === root.groupsMode
+        enabled: visible
+        clip: true
+        model: root.supportedGroups
+        currentIndex: 0
+        activeFocusOnTab: true
+        boundsBehavior: Flickable.StopAtBounds
+        keyNavigationEnabled: false
+        highlightMoveDuration: 80
+        Accessible.role: Accessible.List
+        Accessible.name: "Visible thing groups"
+        Accessible.description: "Checked groups appear in Everything search results"
+        Accessible.focusable: true
+        Accessible.focused: activeFocus
+
+        ScrollBar.vertical: ScrollBar {
+          policy: ScrollBar.AsNeeded
+          leftPadding: Style.space(4)
+          rightPadding: 0
+          palette.mid: Color.accent
+          palette.dark: Color.accent
+        }
+
+        delegate: Item {
+          id: groupRow
+          required property var modelData
+          required property int index
+          objectName: "everything-group-" + modelData.kind
+          width: groupList.width
+          height: root.groupChecklistRowHeight
+          readonly property bool checked: !root.kindDisabled(modelData.kind)
+          readonly property bool highlighted: groupList.currentIndex === index
+            && (groupList.activeFocus || keyCatcher.activeFocus)
+
+          function activate() {
+            root.setGroupChecklistIndex(index)
+            groupList.forceActiveFocus()
+            root.toggleKindVisibility(modelData.kind)
+          }
+
+          Accessible.role: Accessible.CheckBox
+          Accessible.name: modelData.sectionLabel
+          Accessible.description: checked
+            ? "Shown in Everything search results" : "Hidden from Everything search results"
+          Accessible.checkable: true
+          Accessible.checked: checked
+          Accessible.focusable: true
+          Accessible.focused: highlighted
+          Accessible.onPressAction: groupRow.activate()
+          Accessible.onToggleAction: groupRow.activate()
+
+          Rectangle {
+            anchors.fill: parent
+            anchors.bottomMargin: Style.space(1)
+            radius: Style.cornerRadius
+            color: groupRow.highlighted
+              ? Style.focusFillFor(root.foreground, Color.accent)
+              : "transparent"
+          }
+
+          Text {
+            id: groupCheckmark
+            anchors.left: parent.left
+            anchors.leftMargin: Style.space(8)
+            anchors.verticalCenter: parent.verticalCenter
+            width: Style.space(24)
+            text: groupRow.checked ? "\uf14a" : "\uf0c8"
+            color: groupRow.checked ? Color.accent : root.dimForeground
+            font.family: Style.font.family
+            font.pixelSize: Style.font.body
+            horizontalAlignment: Text.AlignHCenter
+          }
+
+          Text {
+            id: groupIcon
+            anchors.left: groupCheckmark.right
+            anchors.leftMargin: Style.space(6)
+            anchors.verticalCenter: parent.verticalCenter
+            width: Style.space(24)
+            text: groupRow.modelData.icon
+            color: groupRow.highlighted ? root.foreground : root.dimForeground
+            font.family: Style.font.family
+            font.pixelSize: Style.font.icon
+            horizontalAlignment: Text.AlignHCenter
+          }
+
+          Text {
+            anchors.left: groupIcon.right
+            anchors.leftMargin: Style.space(8)
+            anchors.right: parent.right
+            anchors.rightMargin: Style.space(8)
+            anchors.verticalCenter: parent.verticalCenter
+            text: groupRow.modelData.sectionLabel
+            color: groupRow.checked ? root.foreground : root.dimForeground
+            font.family: Style.font.family
+            font.pixelSize: Style.font.body
+            elide: Text.ElideRight
+          }
+
+          MouseArea {
+            objectName: "everything-group-pointer-" + groupRow.modelData.kind
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: groupRow.activate()
           }
         }
       }

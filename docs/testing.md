@@ -15,8 +15,9 @@ The suite performs:
   names only, rejection of subsequences and cross-field queries, explicit
   exclusion of context/provider/badges/search terms, stable kind grouping,
   natural displayed-metadata order with relevance/current/recency tie-breakers,
-  parent-derived metadata, duplicate identity handling, token authentication,
-  and hidden-result persistence;
+  the complete ordered 14-group catalog, disabled-kind normalization and
+  exclusion, parent-derived metadata through disabled parents, duplicate
+  identity handling, token authentication, and hidden-result persistence;
 - Hyprland window-to-desktop-entry icon matching, exact Omarchy app-glyph
   precedence, glyph-colored image fallback, generic fallback and Herdr agent
   glyphs, one-line row density, vital-metadata selection,
@@ -47,10 +48,13 @@ The suite performs:
 - Neovim's unique/ambiguous Herdr and multi-surface Ghostty routing;
 - QML lint and an offscreen Quickshell fixture that synchronously loads both
   entrypoints, verifies the chevron's painted horizontal center without
-  changing its shell slot or pointer target, and exercises two independent
-  monitor leases. The fixture swaps only compositor-dependent `KeyboardPanel`
-  for an API-equivalent test double, because Qt's offscreen backend cannot
-  instantiate a layer-shell `PanelWindow`;
+  changing its shell slot or pointer target, exercises two independent monitor
+  leases, and covers right-click checklist routing, all supported checkbox
+  rows, pointer and keyboard toggles, immediate filtering, persistence calls,
+  cross-monitor settings injection, selection recovery, mode switching, and
+  results-only lease transitions. The fixture swaps only compositor-dependent
+  `KeyboardPanel` for an API-equivalent test double, because Qt's offscreen
+  backend cannot instantiate a layer-shell `PanelWindow`;
 - `omarchy plugin validate .` against the installed current manifest schema.
 
 ## Live helper smoke test
@@ -81,6 +85,21 @@ single refresh followed by a visible stale notification.
 - Multiple monitors: invoke the shell shortcut while each monitor is focused;
   only that monitor's widget opens. Open two panels by pointer to confirm the
   helper remains leased until both close.
+- Right-click the bar icon before opening results. Confirm the checklist shows
+  all 14 supported groups in result-heading order, every row is checked even
+  when that kind has no discovered things, and no discovery helper starts.
+  Use Up/Down and pointer clicks to move, Enter/Space to toggle, Tab to follow
+  shell panel navigation, and Escape to close. While it remains open,
+  left-click the icon and confirm it switches in place to results and acquires
+  a lease; right-click again and confirm it switches back and releases it.
+- Uncheck groups and confirm their rows disappear immediately without changing
+  transient per-thing hiding or per-opening collapse. Disable a parent group
+  while leaving a child group enabled and confirm the child keeps its parent
+  metadata. Disable all groups and confirm results remain intentionally empty,
+  then recheck them and confirm the rows return. Open the checklist on a second
+  monitor and confirm changes synchronize. Reopen the panel, reload the plugin,
+  and restart the shell to confirm the choices persist; a newly supported group
+  must start checked.
 - Confirm search owns initial focus and printable input edits it immediately.
   Press Down or Tab to enter navigation, then confirm K/J move backward/forward
   like Up/Down and H/L collapse/expand like Left/Right. Enter/Space activates,

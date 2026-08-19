@@ -106,9 +106,11 @@ before replacing its list model. An identical sequence is a no-op.
 
 ## Service lease
 
-Each bar instance owns a unique in-memory lease. The first open panel starts
-the helper; the last close requests shutdown unless an activation is pending.
-The panel closes before `Qt.callLater` sends activation, releasing the
-layer-shell keyboard grab before another surface receives focus. A helper
-restart clears queued tokens because process-local secrets intentionally do
-not survive restart.
+Each bar instance owns a unique in-memory results lease. Opening or switching
+to results acquires it; closing results or switching to the shell-only group
+checklist releases it. A checklist-only popup therefore sends no helper
+message. The first results lease starts the helper, and release of the last one
+requests shutdown unless an activation is pending. The panel closes before
+`Qt.callLater` sends activation, releasing the layer-shell keyboard grab before
+another surface receives focus. A helper restart clears queued tokens because
+process-local secrets intentionally do not survive restart.

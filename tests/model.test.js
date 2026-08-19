@@ -25,6 +25,66 @@ const item = (id, title, context, extra = {}) => ({
 })
 
 {
+  const catalog = sandbox.supportedGroupCatalog()
+  const expectedKinds = [
+    "window", "browser-tab", "app-tab", "terminal-tab", "terminal-pane",
+    "herdr-agent", "herdr-workspace", "herdr-tab", "herdr-pane", "herdr-session",
+    "tmux-session", "tmux-window", "tmux-pane", "neovim-buffer",
+  ]
+  const expectedSections = [
+    "Windows", "Browser tabs", "Application tabs", "Terminal tabs", "Terminal panes",
+    "Herdr agents", "Herdr workspaces", "Herdr tabs", "Herdr panes", "Herdr sessions",
+    "tmux sessions", "tmux windows", "tmux panes", "Buffers",
+  ]
+  assert.deepEqual(Array.from(catalog, group => group.kind), expectedKinds,
+    "the catalog contains all supported groups in display order")
+  assert.deepEqual(Array.from(catalog, group => group.sectionLabel), expectedSections,
+    "the checklist and result headings share their labels")
+  for (let index = 0; index < catalog.length; index++) {
+    assert.equal(catalog[index].order, index, `${catalog[index].kind} has a stable order`)
+    assert.equal(sandbox.kindOrder(catalog[index].kind), index)
+    assert.equal(sandbox.kindLabel(catalog[index].kind), catalog[index].label)
+    assert.equal(sandbox.kindSectionLabel(catalog[index].kind), catalog[index].sectionLabel)
+  }
+  assert.equal(sandbox.kindOrder("__proto__"), 1000,
+    "unknown object-prototype names remain unsupported kinds")
+
+  const normalized = value => Array.from(sandbox.normalizeDisabledKinds(value))
+  assert.deepEqual(normalized(undefined), [], "missing settings enable every group")
+  assert.deepEqual(normalized(null), [])
+  assert.deepEqual(normalized("window"), [], "a scalar string is not a valid string array")
+  assert.deepEqual(normalized({ window: true }), [], "objects are not valid string arrays")
+  assert.deepEqual(normalized({ 0: "window", length: Infinity }), [],
+    "malformed array-like lengths are ignored")
+  assert.deepEqual(normalized([
+    "tmux-pane", "unknown", 12, null, "browser-tab", "tmux-pane",
+    " Browser-tab", "WINDOW",
+  ]), ["browser-tab", "tmux-pane"],
+  "normalization ignores malformed and unknown entries, deduplicates, and restores catalog order")
+  assert.deepEqual(normalized({ 0: "neovim-buffer", 1: "window", length: 2 }),
+    ["window", "neovim-buffer"], "Qt-style string lists are accepted")
+}
+
+{
+  const rows = [
+    item("window", "Window", "", { kind: "window" }),
+    item("browser", "Browser", "", { kind: "browser-tab" }),
+    item("buffer", "Buffer", "", { kind: "neovim-buffer" }),
+  ]
+  assert.deepEqual(Array.from(sandbox.rank(rows, "", {}), row => row.id),
+    ["window", "browser", "buffer"], "omitting disabled kinds leaves every group enabled")
+  assert.deepEqual(Array.from(sandbox.rank(rows, "", {}, ["browser-tab"]), row => row.id),
+    ["window", "buffer"], "disabled groups are excluded before ranking")
+  assert.deepEqual(Array.from(sandbox.rank(rows, "browser", {}, ["browser-tab"]), row => row.id),
+    [], "search cannot restore a disabled group")
+  assert.deepEqual(Array.from(sandbox.rank(rows, "", {}, ["unknown"]), row => row.id),
+    ["window", "browser", "buffer"], "unknown disabled kinds do not hide results")
+  const allKinds = Array.from(sandbox.supportedGroupCatalog(), group => group.kind)
+  assert.deepEqual(Array.from(sandbox.rank(rows, "", {}, allKinds), row => row.id), [],
+    "disabling every supported group intentionally yields no results")
+}
+
+{
   const rows = [
     item("context", "Unrelated", "Project Alpha", { active: true, recency: 4000 }),
     item("title", "Alpha notes", "Old", { recency: -4000 }),
@@ -194,9 +254,9 @@ const item = (id, title, context, extra = {}) => ({
     Array.from(sandbox.rank(rows, "child", {
       "parent-alpha": true,
       "parent-zulu": true,
-    }), row => row.id),
+    }, ["herdr-tab"]), row => row.id),
     ["child-alpha", "child-zulu"],
-    "parent-derived Herdr metadata controls ordering even when parents are filtered",
+    "enabled children keep parent-derived ordering when their parent group is hidden and disabled",
   )
 }
 
@@ -391,17 +451,21 @@ const resultDelegateHandler = qml.slice(resultDelegateStart, qml.indexOf("MouseA
 assert.doesNotMatch(searchHandler, /Key_Backspace|Key_Delete/, "search owns editing keys")
 assert.match(searchHandler, /placeholderText:\s*"Search everything…"/,
   "the search placeholder uses the requested copy")
-assert.match(qml, /focusTarget:\s*searchField/,
-  "search is the panel's initial focus target")
-assert.match(qml, /PanelKeyCatcher\s*\{[\s\S]*blocked:\s*searchField\.activeFocus/,
-  "the standard shell key catcher yields only while search is being edited")
 assert.match(qml,
-  /onMoveRequested:[\s\S]*dy !== 0[\s\S]*moveSelection\(dy\)[\s\S]*dx < 0[\s\S]*collapseCurrentGroup\(\)[\s\S]*dx > 0[\s\S]*expandCurrentGroup\(\)/,
-  "the shell's vertical directions move while horizontal directions fold groups")
-assert.match(qml, /onActivateRequested:\s*root\.activateCurrent/,
-  "the shell's Enter and Space action activates a row or expands a collapsed group")
-assert.match(qml, /onDeleteRequested:\s*root\.hideAt/,
-  "the shell's X action hides the selected thing")
+  /focusTarget:\s*root\.popupMode === root\.groupsMode \? groupList : searchField/,
+  "search remains the results focus target while the checklist targets its list")
+assert.match(qml,
+  /PanelKeyCatcher\s*\{[\s\S]*blocked:\s*root\.popupMode === root\.resultsMode && searchField\.activeFocus/,
+  "the standard shell key catcher yields only while result search is being edited")
+assert.match(qml,
+  /onMoveRequested:[\s\S]*groupsMode[\s\S]*moveGroupChecklist\(dy\)[\s\S]*moveSelection\(dy\)[\s\S]*dx < 0[\s\S]*collapseCurrentGroup\(\)[\s\S]*dx > 0[\s\S]*expandCurrentGroup\(\)/,
+  "the shell's vertical directions move either list while result horizontals fold groups")
+assert.match(qml,
+  /onActivateRequested:[\s\S]*groupsMode[\s\S]*toggleCurrentGroupVisibility\(\)[\s\S]*activateCurrent\(\)/,
+  "the shell's Enter and Space action toggles a checkbox or activates a result")
+assert.match(qml,
+  /onDeleteRequested:[\s\S]*resultsMode[\s\S]*hideAt\(resultList\.currentIndex\)/,
+  "the shell's X action only hides a selected result")
 assert.match(qml, /onTabRequested:[^\n]*root\.switchPanel\(direction\)/,
   "the shell owns Tab navigation between panels")
 assert.match(listHandler, /Keys\.onPressed[\s\S]*handleSupplementalListKey/,
@@ -429,7 +493,22 @@ assert.match(qml, /root\.applyOpenResultReset\(\)[\s\S]*searchField\.forceActive
 assert.match(qml, /function applyOpenResultReset\(\)[\s\S]*currentIndex = index[\s\S]*contentY = resultList\.originY/,
   "opening selects the first thing and resets the list scroll")
 assert.match(qml, /onOpenedChanged:[\s\S]*searchField\.text = ""[\s\S]*rebuildRankedItems\(\)[\s\S]*resetResultsForOpen\(\)/,
-  "every panel opening resets against the unfiltered ranked list")
+  "every results opening resets against the unsearched ranked list")
+assert.match(qml,
+  /readonly property var supportedGroups:\s*Model\.supportedGroupCatalog\(\)[\s\S]*readonly property var disabledKinds:\s*Model\.normalizeDisabledKinds\([\s\S]*setting\("disabledKinds", \[\]\)/,
+  "the checklist and injected settings use the pure canonical model")
+assert.match(qml,
+  /var nextItems = Model\.rank\([\s\S]*everythingService\.hiddenIds[\s\S]*disabledKinds\)/,
+  "persistent group visibility participates in every ranked rebuild")
+assert.match(qml,
+  /function persistDisabledKinds[\s\S]*entry\.disabledKinds = nextKinds[\s\S]*root\.settings = entry[\s\S]*updateEntryInline\(root\.moduleName, entry\)/,
+  "group changes apply optimistically before shell.json persistence and monitor synchronization")
+assert.match(qml,
+  /readonly property bool resultsModeOpen:\s*root\.opened && popupMode === resultsMode/,
+  "helper leases distinguish results visibility from checklist visibility")
+assert.match(qml,
+  /onResultsModeOpenChanged:[\s\S]*if \(resultsModeOpen\) everythingService\.acquire\(instanceKey\)[\s\S]*else everythingService\.release\(instanceKey\)/,
+  "switching popup modes acquires and releases the results-only helper lease")
 assert.match(qml, /PointerMoveGate\s*\{[\s\S]*?referenceItem:\s*resultList[\s\S]*?\}/,
   "row pointer selection uses the shell movement gate")
 assert.match(qml, /function selectFromPointer[\s\S]*if \(!pointerMoveGate\.moved\(item, mouse\)\) return[\s\S]*setCurrentIndex\(index, false\)/,
@@ -459,6 +538,21 @@ assert.match(qml, /id:\s*sectionHeading[\s\S]*readonly property bool collapsed:[
 assert.match(resultDelegateHandler,
   /height:\s*groupCollapsed \? 0 : root\.rowHeight[\s\S]*visible:\s*!groupCollapsed/,
   "collapsing a group hides its rows without removing its heading")
+const groupListStart = qml.indexOf("id: groupList")
+const groupDelegateStart = qml.indexOf("\n        delegate: Item", groupListStart)
+const groupListHandler = qml.slice(groupListStart, groupDelegateStart)
+const groupDelegateHandler = qml.slice(groupDelegateStart)
+assert.match(groupListHandler,
+  /model:\s*root\.supportedGroups[\s\S]*Accessible\.role:\s*Accessible\.List/,
+  "the group panel renders the complete canonical catalog as an accessible list")
+assert.doesNotMatch(groupListHandler, /Keys\.onPressed/,
+  "the checklist leaves Tab and standard movement to the shell key catcher")
+assert.match(groupDelegateHandler,
+  /Accessible\.role:\s*Accessible\.CheckBox[\s\S]*Accessible\.checkable:\s*true[\s\S]*Accessible\.checked:\s*checked[\s\S]*Accessible\.onToggleAction:/,
+  "every group row exposes checkbox accessibility semantics")
+assert.match(groupDelegateHandler,
+  /function activate\(\)[\s\S]*setGroupChecklistIndex\(index\)[\s\S]*toggleKindVisibility\(modelData\.kind\)[\s\S]*MouseArea[\s\S]*onClicked:\s*groupRow\.activate\(\)/,
+  "pointer input selects and toggles the same checklist row")
 assert.match(qml, /import QtQuick\.Effects/,
   "the window image fallback can use the shell-compatible color effect")
 assert.match(qml, /id:\s*mappedWindowGlyph[\s\S]*text:\s*row\.windowAppGlyph/,
@@ -506,7 +600,12 @@ assert.doesNotMatch(qml, /id:\s*footer|HJKL\/↑↓ move|Keyboard help:/,
 assert.doesNotMatch(qml, /centerOnBar\s*:/, "panel uses the shell's default icon anchoring")
 assert.doesNotMatch(qml, /function\s+(?:open|close|togglePanel)\s*\(/,
   "panel uses the inherited shell lifecycle")
-assert.match(qml, /onPressed:[^\n]*root\.toggle\(\)/, "bar button uses the inherited shell toggle")
+assert.match(qml,
+  /onPressed:\s*function\(buttonCode\)[\s\S]*buttonCode === Qt\.RightButton[\s\S]*root\.groupsMode : root\.resultsMode/,
+  "right-click routes to the checklist while every primary bar action routes to results")
+assert.match(qml,
+  /function togglePopupMode[\s\S]*root\.opened && popupMode === wanted[\s\S]*root\.close\(\)[\s\S]*if \(root\.opened\)[\s\S]*enterPopupMode\(wanted\)[\s\S]*root\.open\(\)/,
+  "same-mode clicks toggle the inherited panel and other-mode clicks switch in place")
 
 const serviceQml = fs.readFileSync(path.join(root, "Service.qml"), "utf8")
 assert.match(serviceQml, /reconcileItems\(items, incoming\)/, "token-only snapshots keep the visible model stable")

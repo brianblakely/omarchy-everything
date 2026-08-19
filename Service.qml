@@ -3,9 +3,10 @@ import Quickshell
 import Quickshell.Io
 import "EverythingModel.js" as Model
 
-// Shell-wide state and helper lifecycle. Bar instances acquire a lease while
-// their panel is open. The Python helper therefore exists only while at least
-// one panel needs discovery, or while an activation is still in flight.
+// Shell-wide state and helper lifecycle. Bar instances acquire a lease only
+// while their results mode is open. The Python helper therefore exists only
+// while at least one panel needs discovery, or an activation is still in
+// flight; the shell-only group checklist does not start it.
 Item {
   id: root
 
