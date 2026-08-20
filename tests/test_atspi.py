@@ -540,7 +540,8 @@ class NativeTabTests(unittest.TestCase):
         for _index in range(12):
             nested = FakeAccessible(Atspi.Role.PANEL, "", nested)
         root = FakeAccessible(Atspi.Role.FRAME, "Home", nested)
-        top = TopLevel(None, root, 42, 0, "Home", client)
+        application = FakeAccessible(Atspi.Role.APPLICATION, "Files")
+        top = TopLevel(application, root, 42, 0, "Home", client)
         tree = AtspiTree.__new__(AtspiTree)
         tree.top_levels = lambda _context: [top]  # type: ignore[method-assign]
         context = ScanContext(
@@ -576,6 +577,7 @@ class NativeTabTests(unittest.TestCase):
 
         self.assertEqual([item.kind for item in result.items], ["app-tab", "app-tab"])
         self.assertEqual([item.title for item in result.items], ["Home", "Downloads"])
+        self.assertEqual({item.provider for item in result.items}, {"Files"})
         self.assertEqual({item.parent_id for item in result.items}, {"hyprland:window"})
         self.assertEqual(len({item.id for item in result.items}), 2)
         self.assertEqual(len(provider.objects), 2)

@@ -857,7 +857,7 @@ class AtspiProvider:
             parent = self._window_parent_id(context, address)
             active_window = int(top.client.get("focusHistoryID") or 0) == 0
             kind = "browser-tab" if is_browser else "app-tab"
-            provider_name = self._provider_name(app_class, is_browser)
+            provider_name = self._provider_name(app_class, is_browser, top.application)
             for tab, tab_route in zip(tabs, tab_routes):
                 item_id = stable_id(self.name, pid, birth, address, tab.native_id)
                 objects[item_id] = tab
@@ -885,10 +885,17 @@ class AtspiProvider:
         return items, objects, browser_addresses
 
     @staticmethod
-    def _provider_name(app_class: str, browser: bool) -> str:
+    def _provider_name(app_class: str, browser: bool, application: Any = None) -> str:
         value = app_class.lower()
         if not browser:
-            return "Application"
+            getter = getattr(application, "get_name", None)
+            app_name = clean_text(safe_call("", getter)) if callable(getter) else ""
+            if app_name:
+                return app_name
+            identity = clean_text(app_class)
+            if identity.lower().endswith(".desktop"):
+                identity = identity[:-8]
+            return identity.rsplit(".", 1)[-1] or "Application"
         for needle, label in (
             ("librewolf", "LibreWolf"),
             ("firefox", "Firefox"),

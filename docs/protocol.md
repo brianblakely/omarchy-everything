@@ -79,7 +79,7 @@ Every public item contains:
 | `id` | Stable provider/native identity, including process birth or socket identity where reuse is possible |
 | `uiUuid` | Deterministic UUIDv5 derived from provider, kind, and native identity for UI reconciliation |
 | `kind` | One supported actionable thing kind |
-| `provider` | Human-readable provider badge |
+| `provider` | Human-readable provider badge; browser and application tabs use their owning application label |
 | `title` | Primary display title and the only searchable item field |
 | `iconHints` | Ordered, presentation-only icon/application identities; populated for managed windows from Hyprland client data |
 | `context` | Cwd, application, workspace, or container context; never searched |

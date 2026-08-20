@@ -43,6 +43,7 @@ The suite performs:
   native default-action activation, deep GTK 4 tab lists with one transparent
   grouping wrapper, repeated toolkit accessibility IDs, rejection of generic
   component-only tabs, capability-tested Pinta/Nautilus action routes,
+  owning-application names on application-tab metadata,
   D-Bus owner/action/signature/index validation, pre/post native-identity
   checks, multi-window ambiguity, and exclusion of document-authored/tool tab
   strips;
@@ -132,8 +133,9 @@ single refresh followed by a visible stale notification.
   application with genuine native tabs and an editor/web app with DOM tabs.
   Confirm the deep, grouping-wrapped Nautilus/Pinta strips expand, only native
   application tabs become rows, duplicate toolkit accessibility IDs remain
-  distinct, every row switches to the exact tab, and every application retains
-  its outer-window row. Open two Nautilus windows and confirm their ambiguous
+  distinct, each row's metadata names its owning application, every row
+  switches to the exact tab, and every application retains its outer-window
+  row. Open two Nautilus windows and confirm their ambiguous
   component-only tabs disappear while both outer-window rows remain.
 - Confirm browser rows are title-only and never claim a URL or favicon.
 

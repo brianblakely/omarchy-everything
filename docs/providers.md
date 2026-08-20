@@ -56,7 +56,10 @@ GTK/Qt applications must expose both the bounded native structure above and a
 preferred AT-SPI tab action. A component interface alone is not an activation
 guarantee and does not make a generic application tab a thing.
 DOM/editor tabs with no reliable external adapter remain represented by their
-outer window.
+outer window. An application-tab row uses its owning AT-SPI application's
+cleaned accessible name as its provider and displayed metadata, falling back
+to the final component of the managed application class when that name is not
+available.
 
 AT-SPI exposes titles. URLs, favicons, and browser history are not part of the
 0.0.1 contract. The browser-side assumptions are intentionally limited to the
