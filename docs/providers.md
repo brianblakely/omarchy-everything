@@ -27,13 +27,24 @@ matches [Alacritty's explicit non-goal of providing tabs or splits](https://gith
 
 The AT-SPI provider looks for actionable `PAGE_TAB_LIST`/`PAGE_TAB` objects
 outside every `DOCUMENT_*` subtree. It rejects dock, tool, sidebar, inspector,
-and developer-tool strips, then chooses a browser's primary strip by real page
-tab count with depth as a tie-breaker. This supports horizontal, vertical, and
-custom native tab-strip layouts without accepting page-authored ARIA tabs.
-When a managed browser is first seen, discovery allows one bounded settle pass
-for its native controls: Chromium can publish the top-level frame before its
-tab strip has arrived on AT-SPI. Managed-window rows still publish immediately,
-and later browser rows merge into the same open panel.
+and developer-tool strips. A tab must be either a direct child of its tab list
+or the sole child of one transparent `GROUPING` wrapper, matching current
+GTK 4/libadwaita tab bars without recursively accepting arbitrary controls.
+Within the globally bounded AT-SPI walk, absolute application-tree depth is not
+used as a native/tab distinction; document ancestry is. The provider then
+chooses a browser's primary strip by real page-tab count with depth as a
+tie-breaker. This supports horizontal, vertical, and custom native tab-strip
+layouts without accepting page-authored ARIA tabs.
+
+When a managed browser is first seen, discovery gives its native controls a
+bounded settle pass: Chromium can publish the top-level frame before its tab
+strip has arrived on AT-SPI. Only exact browser addresses whose tab strips
+were actually observed become settled. An uncovered address remains eligible
+for the same bounded wait on a later poll, and a previously covered address
+becomes unsettled if a later first pass loses its strip. A cold or temporarily
+incomplete accessibility tree therefore cannot permanently suppress its tabs.
+Managed-window rows still publish immediately, and later browser rows merge
+into the same open panel.
 
 Recognized current Omarchy browser classes cover Chromium, Chrome, Brave
 variants, Edge, Firefox, Zen, Vivaldi, Helium, and LibreWolf. Normal private
@@ -41,7 +52,9 @@ windows use the same strict per-window matching. App-mode/PWA windows are
 identified from the current browser-derived class or Omarchy launch-time web
 identity and emit no tab row—not even a generic application-tab row—because
 their single browser tab is not distinct from the managed window. Generic
-GTK/Qt applications must expose a shallow, fully actionable native tab strip.
+GTK/Qt applications must expose both the bounded native structure above and a
+preferred AT-SPI tab action. A component interface alone is not an activation
+guarantee and does not make a generic application tab a thing.
 DOM/editor tabs with no reliable external adapter remain represented by their
 outer window.
 
@@ -49,8 +62,31 @@ AT-SPI exposes titles. URLs, favicons, and browser history are not part of the
 0.0.1 contract. The browser-side assumptions are intentionally limited to the
 [Chromium accessibility architecture](https://chromium.googlesource.com/chromium/src/%2B/main/docs/accessibility/overview.md)
 and equivalent native AT-SPI trees in the other listed families.
-Activation invokes the native tab's exposed default action (including
-Chromium's `dodefault`) before focusing its exact managed window.
+Tab identity combines a toolkit accessibility ID with its unique remote object
+path, falling back to its validated structural path when necessary; repeated
+type-like GTK IDs such as `AdwTab` therefore cannot collide. Activation invokes
+the native tab's exposed preferred action (including Chromium's `dodefault`)
+before focusing its exact managed window.
+
+Current packaged Pinta and Nautilus use GTK 4/libadwaita tabs that expose only
+a non-operative AT-SPI component-focus interface. They are admitted through
+two exact `org.gtk.Actions` adapters instead:
+
+- Pinta must have exactly one session-bus connection owned by its managed PID
+  that exports the integer `active_document` action at
+  `/com/github/PintaProject/Pinta`. Its live state must identify the tab named
+  by the matched top-level window. Activation changes that state to the exact
+  tab index and polls until the exported state confirms it.
+- Nautilus must own `org.gnome.Nautilus` and expose exactly one enabled integer
+  `go-to-tab` action under `/org/gnome/Nautilus/window/<number>`. Nautilus does
+  not update that action's exported state with tab selection, so more than one
+  exported window is ambiguous and application-tab rows fail closed. The
+  single-window route activates the exact integer index.
+
+Both adapters revalidate process ownership, action name/signature, tab count,
+index, and the target's native identity immediately around activation. Other
+component-only tabs remain omitted while their exact outer-window row stays
+available.
 
 ## Kitty
 

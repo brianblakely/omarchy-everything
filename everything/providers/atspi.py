@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import re
 import threading
+import time
 import unicodedata
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Iterator
@@ -16,10 +17,12 @@ try:
     import gi
 
     gi.require_version("Atspi", "2.0")
+    gi.require_version("Gio", "2.0")
     gi.require_version("GLib", "2.0")
-    from gi.repository import Atspi, GLib
+    from gi.repository import Atspi, Gio, GLib
 except (ImportError, ValueError):  # Covered as an isolated provider warning.
     Atspi = None  # type: ignore[assignment]
+    Gio = None  # type: ignore[assignment]
     GLib = None  # type: ignore[assignment]
 
 
@@ -38,8 +41,20 @@ BROWSER_APP_MODE_TITLE = re.compile(
     re.IGNORECASE,
 )
 GHOSTTY_CLASS = re.compile(r"(?:com\.mitchellh\.ghostty|ghostty)", re.IGNORECASE)
-REJECTED_STRIP_NAME = re.compile(r"(?:dock|tool|sidebar|side panel|developer tools|inspector)", re.IGNORECASE)
+REJECTED_STRIP_NAME = re.compile(
+    r"(?:dock|tool|sidebar|side panel|developer tools|inspector)",
+    re.IGNORECASE,
+)
 BROWSER_SETTLE_DELAYS = (0.1, 0.2, 0.4, 0.8)
+PREFERRED_TAB_ACTIONS = ("activate", "click", "press", "select", "dodefault")
+GTK_ACTION_INTERFACE = "org.gtk.Actions"
+DBUS_INTERFACE = "org.freedesktop.DBus"
+DBUS_DESTINATION = "org.freedesktop.DBus"
+DBUS_PATH = "/org/freedesktop/DBus"
+GTK_ACTION_TIMEOUT_MS = 500
+GTK_ACTION_STATE_DELAYS = (0.0, 0.05, 0.1, 0.2, 0.4)
+NAUTILUS_WINDOW_PATH = re.compile(r"/org/gnome/Nautilus/window/[1-9][0-9]{0,9}$")
+NAUTILUS_WINDOW_NODE = re.compile(r'<node\s+name=["\']([1-9][0-9]{0,9})["\'](?:\s|/|>)')
 
 
 def clean_text(value: Any) -> str:
@@ -141,34 +156,66 @@ def walk(root: Any, *, max_nodes: int = 6000, max_depth: int = 24) -> Iterator[N
 
 
 def action_names(accessible: Any) -> list[str]:
-    action = safe_call(None, accessible.get_action_iface)
+    getter = getattr(accessible, "get_action_iface", None)
+    action = safe_call(None, getter) if callable(getter) else None
     if not action:
         return []
     count = int(safe_call(0, action.get_n_actions) or 0)
-    return [clean_text(safe_call("", action.get_action_name, index)).lower() for index in range(count)]
+    return [
+        clean_text(safe_call("", action.get_action_name, index)).lower()
+        for index in range(count)
+    ]
+
+
+def component_iface(accessible: Any) -> Any:
+    getter = getattr(accessible, "get_component_iface", None)
+    return safe_call(None, getter) if callable(getter) else None
+
+
+def preferred_action_index(
+    accessible: Any,
+    preferred: Iterable[str] = PREFERRED_TAB_ACTIONS,
+) -> tuple[Any, int] | None:
+    getter = getattr(accessible, "get_action_iface", None)
+    action = safe_call(None, getter) if callable(getter) else None
+    if not action:
+        return None
+    names = action_names(accessible)
+    for wanted in preferred:
+        for index, name in enumerate(names):
+            if wanted == name or wanted in name:
+                return action, index
+    return None
+
+
+def invoke_accessible_action(
+    accessible: Any,
+    preferred: Iterable[str] = PREFERRED_TAB_ACTIONS,
+) -> bool:
+    target = preferred_action_index(accessible, preferred)
+    return bool(target and safe_call(False, target[0].do_action, target[1]))
 
 
 def invoke_accessible(
     accessible: Any,
-    preferred: Iterable[str] = ("activate", "click", "press", "select", "dodefault"),
+    preferred: Iterable[str] = PREFERRED_TAB_ACTIONS,
 ) -> bool:
-    action = safe_call(None, accessible.get_action_iface)
-    if action:
-        names = action_names(accessible)
-        for wanted in preferred:
-            for index, name in enumerate(names):
-                if wanted == name or wanted in name:
-                    return bool(safe_call(False, action.do_action, index))
-    component = safe_call(None, accessible.get_component_iface)
+    if invoke_accessible_action(accessible, preferred):
+        return True
+    component = component_iface(accessible)
     return bool(component and safe_call(False, component.grab_focus))
 
 
 def accessible_id(accessible: Any, fallback: str) -> str:
     value = clean_text(safe_call("", accessible.get_accessible_id))
-    if value:
-        return value
     path = clean_text(getattr(accessible, "path", ""))
-    return path or fallback
+    location = path or fallback
+    if value:
+        # GTK 4/libadwaita exposes the same type-like id (for example
+        # ``AdwTab``) for every tab. Pair it with the unique remote object path
+        # or structural fallback instead of treating it as a native key alone.
+        return value + "@" + location
+    return location
 
 
 @dataclass(slots=True)
@@ -191,6 +238,293 @@ class NativeTab:
     title: str
     selected: bool
     native_id: str
+
+
+class GtkActionBus:
+    """Capability-test and invoke exact integer GTK tab actions."""
+
+    def __init__(self) -> None:
+        if Gio is None or GLib is None:
+            raise CommandError("GIO D-Bus bindings are unavailable")
+        self.connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        self.pid_destinations: dict[int, list[str]] = {}
+
+    def _call(
+        self,
+        destination: str,
+        object_path: str,
+        interface: str,
+        method: str,
+        parameters: Any,
+    ) -> Any:
+        return self.connection.call_sync(
+            destination,
+            object_path,
+            interface,
+            method,
+            parameters,
+            None,
+            Gio.DBusCallFlags.NO_AUTO_START,
+            GTK_ACTION_TIMEOUT_MS,
+            None,
+        )
+
+    def _connection_pid(self, destination: str) -> int:
+        result = self._call(
+            DBUS_DESTINATION,
+            DBUS_PATH,
+            DBUS_INTERFACE,
+            "GetConnectionUnixProcessID",
+            GLib.Variant("(s)", (destination,)),
+        )
+        values = result.unpack()
+        return int(values[0]) if values else 0
+
+    def _pid_destinations(self, pid: int) -> list[str]:
+        if pid in self.pid_destinations:
+            return list(self.pid_destinations[pid])
+        result = self._call(
+            DBUS_DESTINATION,
+            DBUS_PATH,
+            DBUS_INTERFACE,
+            "ListNames",
+            None,
+        )
+        values = result.unpack()
+        names = values[0] if values and isinstance(values[0], list) else []
+        matches: list[str] = []
+        for name in names[:512]:
+            value = str(name)
+            if not re.fullmatch(r":[0-9]{1,10}\.[0-9]{1,10}", value):
+                continue
+            try:
+                owner_pid = self._connection_pid(value)
+            except Exception:
+                continue
+            if owner_pid == pid:
+                matches.append(value)
+        self.pid_destinations[pid] = matches
+        return list(matches)
+
+    def _describe(
+        self,
+        destination: str,
+        object_path: str,
+        action: str,
+    ) -> tuple[bool, str, int]:
+        result = self._call(
+            destination,
+            object_path,
+            GTK_ACTION_INTERFACE,
+            "Describe",
+            GLib.Variant("(s)", (action,)),
+        )
+        values = result.unpack()
+        details = values[0] if values and isinstance(values[0], tuple) else ()
+        if len(details) != 3:
+            return False, "", -1
+        enabled, parameter_type, state_values = details
+        state = (
+            state_values[0]
+            if isinstance(state_values, list) and len(state_values) == 1
+            else -1
+        )
+        if not isinstance(state, int) or isinstance(state, bool):
+            state = -1
+        return bool(enabled), str(parameter_type), int(state)
+
+    def _window_paths(self, destination: str, root: str) -> list[str]:
+        result = self._call(
+            destination,
+            root,
+            "org.freedesktop.DBus.Introspectable",
+            "Introspect",
+            None,
+        )
+        values = result.unpack()
+        xml = str(values[0]) if values else ""
+        if not xml or len(xml) > 65536:
+            return []
+        names = list(dict.fromkeys(NAUTILUS_WINDOW_NODE.findall(xml)))[:64]
+        return [root.rstrip("/") + "/" + name for name in names]
+
+    @staticmethod
+    def _state_matches_top(tabs: list[NativeTab], state: int, top_name: str) -> bool:
+        if state < 0 or state >= len(tabs):
+            return False
+        title = folded(tabs[state].title)
+        current = folded(top_name)
+        return bool(title and current and (title in current or current in title))
+
+    @staticmethod
+    def _routes(
+        adapter: str,
+        destination: str,
+        object_path: str,
+        action: str,
+        tabs: list[NativeTab],
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "kind": "gtk-action",
+                "adapter": adapter,
+                "destination": destination,
+                "object_path": object_path,
+                "action": action,
+                "index": index,
+                "count": len(tabs),
+            }
+            for index in range(len(tabs))
+        ]
+
+    def routes(
+        self,
+        app_class: str,
+        pid: int,
+        top_name: str,
+        tabs: list[NativeTab],
+    ) -> list[dict[str, Any]] | None:
+        if not tabs or len(tabs) > 256:
+            return None
+        value = app_class.lower()
+        try:
+            if value == "com.github.pintaproject.pinta":
+                candidates: list[tuple[str, str]] = []
+                object_path = "/com/github/PintaProject/Pinta"
+                for destination in self._pid_destinations(pid):
+                    enabled, signature, state = self._describe(
+                        destination, object_path, "active_document"
+                    )
+                    if (
+                        enabled
+                        and signature == "i"
+                        and self._state_matches_top(tabs, state, top_name)
+                    ):
+                        candidates.append((destination, object_path))
+                if len(candidates) == 1:
+                    return self._routes(
+                        "pinta",
+                        candidates[0][0],
+                        candidates[0][1],
+                        "active_document",
+                        tabs,
+                    )
+                return None
+
+            if value == "org.gnome.nautilus":
+                destination = "org.gnome.Nautilus"
+                if self._connection_pid(destination) != pid:
+                    return None
+                candidates: list[str] = []
+                root = "/org/gnome/Nautilus/window"
+                for object_path in self._window_paths(destination, root):
+                    enabled, signature, _state = self._describe(
+                        destination, object_path, "go-to-tab"
+                    )
+                    # Nautilus exports a constant initial action state rather
+                    # than tracking the selected page. A single same-process
+                    # window action group is therefore the only unambiguous
+                    # route; multiple exported windows fail closed.
+                    if enabled and signature == "i":
+                        candidates.append(object_path)
+                if len(candidates) == 1:
+                    return self._routes(
+                        "nautilus",
+                        destination,
+                        candidates[0],
+                        "go-to-tab",
+                        tabs,
+                    )
+        except Exception:
+            return None
+        return None
+
+    @staticmethod
+    def _validate_route(route: dict[str, Any]) -> tuple[str, str, str, str, int, int]:
+        adapter = str(route.get("adapter") or "")
+        destination = str(route.get("destination") or "")
+        object_path = str(route.get("object_path") or "")
+        action = str(route.get("action") or "")
+        index = route.get("index")
+        count = route.get("count")
+        if (
+            not isinstance(index, int)
+            or isinstance(index, bool)
+            or not isinstance(count, int)
+            or isinstance(count, bool)
+        ):
+            raise CommandError("native application tab index is invalid")
+        if index < 0 or count <= 0 or count > 256 or index >= count:
+            raise CommandError("native application tab index is invalid")
+        if adapter == "pinta":
+            if (
+                not re.fullmatch(r":[0-9]{1,10}\.[0-9]{1,10}", destination)
+                or object_path != "/com/github/PintaProject/Pinta"
+                or action != "active_document"
+            ):
+                raise CommandError("Pinta tab route is invalid")
+        elif adapter == "nautilus":
+            if (
+                destination != "org.gnome.Nautilus"
+                or not NAUTILUS_WINDOW_PATH.fullmatch(object_path)
+                or action != "go-to-tab"
+            ):
+                raise CommandError("Nautilus tab route is invalid")
+        else:
+            raise CommandError("native application tab route is unsupported")
+        return adapter, destination, object_path, action, index, count
+
+    def activate(self, route: dict[str, Any], pid: int) -> None:
+        adapter, destination, object_path, action, index, count = self._validate_route(
+            route
+        )
+        try:
+            if self._connection_pid(destination) != pid:
+                raise CommandError("native application action owner changed")
+            enabled, signature, state = self._describe(destination, object_path, action)
+            if not enabled or signature != "i":
+                raise CommandError("native application tab action changed")
+            if adapter == "nautilus":
+                self._call(
+                    destination,
+                    object_path,
+                    GTK_ACTION_INTERFACE,
+                    "Activate",
+                    GLib.Variant(
+                        "(sava{sv})",
+                        (action, [GLib.Variant("i", index)], {}),
+                    ),
+                )
+                return
+            if state < 0 or state >= count:
+                raise CommandError("native application tab action changed")
+            if state == index:
+                return
+            self._call(
+                destination,
+                object_path,
+                GTK_ACTION_INTERFACE,
+                "SetState",
+                GLib.Variant(
+                    "(sva{sv})",
+                    (action, GLib.Variant("i", index), {}),
+                ),
+            )
+            for delay in GTK_ACTION_STATE_DELAYS:
+                if delay:
+                    time.sleep(delay)
+                enabled, signature, state = self._describe(
+                    destination,
+                    object_path,
+                    action,
+                )
+                if enabled and signature == "i" and state == index:
+                    return
+        except CommandError:
+            raise
+        except Exception as error:
+            raise CommandError("native application tab action failed") from error
+        raise CommandError("native application did not select the requested tab")
 
 
 class AtspiTree:
@@ -216,8 +550,13 @@ class AtspiTree:
                 # Some toolkits expose an app-side helper PID. Match only when
                 # it has exactly one managed ancestor, never by a loose title.
                 ancestors = context.processes.ancestors(pid)
-                managed_pids = {int(client.get("pid") or 0) for client in context.hypr_clients}
-                ancestor = next((process.pid for process in ancestors if process.pid in managed_pids), None)
+                managed_pids = {
+                    int(client.get("pid") or 0) for client in context.hypr_clients
+                }
+                ancestor = next(
+                    (process.pid for process in ancestors if process.pid in managed_pids),
+                    None,
+                )
                 candidates = context.clients_for_pid(ancestor or 0)
             if not candidates:
                 continue
@@ -226,47 +565,70 @@ class AtspiTree:
                 matched = self._match_client(top_name, candidates)
                 if not matched:
                     continue
-                if not include_ghostty and GHOSTTY_CLASS.search(str(matched.get("class") or "")):
+                if not include_ghostty and GHOSTTY_CLASS.search(
+                    str(matched.get("class") or "")
+                ):
                     continue
                 out.append(TopLevel(application, top, pid, top_index, top_name, matched))
         return out
 
     @staticmethod
-    def _match_client(top_name: str, clients: list[dict[str, Any]]) -> dict[str, Any] | None:
+    def _match_client(
+        top_name: str,
+        clients: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
         if len(clients) == 1:
             return clients[0]
         wanted = folded(top_name)
-        exact = [client for client in clients if folded(client.get("title")) == wanted and wanted]
+        exact = [
+            client
+            for client in clients
+            if folded(client.get("title")) == wanted and wanted
+        ]
         if len(exact) == 1:
             return exact[0]
         contained = [
             client
             for client in clients
-            if wanted and (wanted in folded(client.get("title")) or folded(client.get("title")) in wanted)
+            if wanted
+            and (
+                wanted in folded(client.get("title"))
+                or folded(client.get("title")) in wanted
+            )
         ]
         return contained[0] if len(contained) == 1 else None
 
-    def native_tabs(self, top: TopLevel, *, browser: bool, strict_generic: bool = True) -> list[NativeTab]:
-        candidates: list[tuple[Node, list[tuple[int, Any]]]] = []
+    @staticmethod
+    def _tab_children(tab_list: Any) -> list[tuple[tuple[int, ...], Any]]:
+        """Return direct tabs plus the one transparent wrapper used by GTK 4."""
+
+        tabs: list[tuple[tuple[int, ...], Any]] = []
+        for index, child in enumerate(children(tab_list)):
+            if role(child) == Atspi.Role.PAGE_TAB:
+                tabs.append(((index,), child))
+                continue
+            if role(child) != Atspi.Role.GROUPING:
+                continue
+            wrapped = children(child)
+            if len(wrapped) == 1 and role(wrapped[0]) == Atspi.Role.PAGE_TAB:
+                tabs.append(((index, 0), wrapped[0]))
+        return tabs
+
+    def native_tabs(self, top: TopLevel, *, browser: bool) -> list[NativeTab]:
+        candidates: list[tuple[Node, list[tuple[tuple[int, ...], Any]]]] = []
         for node in walk(top.accessible):
             if node.inside_document or role(node.accessible) != Atspi.Role.PAGE_TAB_LIST:
                 continue
             strip_name = clean_text(safe_call("", node.accessible.get_name))
             if REJECTED_STRIP_NAME.search(strip_name):
                 continue
-            tabs = [
-                (index, child)
-                for index, child in enumerate(children(node.accessible))
-                if role(child) == Atspi.Role.PAGE_TAB
-            ]
+            tabs = self._tab_children(node.accessible)
             if not tabs:
-                continue
-            if strict_generic and not browser and node.depth > 8:
                 continue
             actionable = sum(
                 1
-                for _, tab in tabs
-                if action_names(tab) or safe_call(None, tab.get_component_iface) is not None
+                for _path, tab in tabs
+                if action_names(tab) or component_iface(tab) is not None
             )
             if actionable != len(tabs):
                 continue
@@ -276,23 +638,30 @@ class AtspiTree:
 
         # A browser's primary strip has the most real page tabs. Depth is only
         # the tie-breaker, preserving vertical/custom tab-strip layouts.
-        candidates.sort(key=lambda candidate: (-len(candidate[1]), candidate[0].depth, candidate[0].path))
+        candidates.sort(
+            key=lambda candidate: (
+                -len(candidate[1]),
+                candidate[0].depth,
+                candidate[0].path,
+            )
+        )
         node, tabs = candidates[0]
         result: list[NativeTab] = []
         occurrences: dict[str, int] = {}
-        for tab_index, accessible in tabs:
+        for ordinal, (relative_path, accessible) in enumerate(tabs):
             title = clean_text(safe_call("", accessible.get_name)) or "Untitled tab"
             key = folded(title)
             occurrences[key] = occurrences.get(key, 0) + 1
             occurrence = occurrences[key]
-            native = accessible_id(accessible, ".".join(map(str, node.path + (tab_index,))))
+            tab_path = node.path + relative_path
+            native = accessible_id(accessible, ".".join(map(str, tab_path)))
             result.append(
                 NativeTab(
                     accessible=accessible,
                     top=top,
                     strip_path=node.path,
-                    tab_path=node.path + (tab_index,),
-                    index=tab_index,
+                    tab_path=tab_path,
+                    index=ordinal,
                     title=title,
                     selected=has_state(accessible, Atspi.StateType.SELECTED),
                     native_id=native + f":{occurrence}",
@@ -350,6 +719,21 @@ class AtspiProvider:
     def __init__(self) -> None:
         self.objects: dict[str, NativeTab] = {}
         self.settled_browser_clients: set[tuple[str, int, str]] = set()
+        self.gtk_actions: GtkActionBus | None = None
+
+    def _gtk_action_routes(
+        self,
+        app_class: str,
+        pid: int,
+        top_name: str,
+        tabs: list[NativeTab],
+    ) -> list[dict[str, Any]] | None:
+        if self.gtk_actions is None:
+            try:
+                self.gtk_actions = GtkActionBus()
+            except Exception:
+                return None
+        return self.gtk_actions.routes(app_class, pid, top_name, tabs)
 
     async def scan(self, context: ScanContext) -> ProviderResult:
         cancellation = threading.Event()
@@ -370,6 +754,11 @@ class AtspiProvider:
         self.settled_browser_clients.intersection_update(current_identities)
 
         best = self._collect(context)
+        self.settled_browser_clients = {
+            identity
+            for identity in self.settled_browser_clients
+            if expected[identity] in best[2]
+        }
         new_identities = current_identities - self.settled_browser_clients
         if new_identities:
             expected_addresses = {expected[identity] for identity in new_identities}
@@ -391,7 +780,12 @@ class AtspiProvider:
                     best = candidate
                     best_coverage = coverage
             if not cancelled.is_set():
-                self.settled_browser_clients.update(new_identities)
+                covered_addresses = best[2] & expected_addresses
+                self.settled_browser_clients.update(
+                    identity
+                    for identity in new_identities
+                    if expected[identity] in covered_addresses
+                )
 
         items, objects, _browser_addresses = best
         if not cancelled.is_set():
@@ -423,6 +817,8 @@ class AtspiProvider:
         items: list[Thing] = []
         browser_addresses: set[str] = set()
         top_levels = tree.top_levels(context)
+        candidates: list[tuple[TopLevel, str, bool, int, list[NativeTab], bool]] = []
+        fallback_top_counts: dict[tuple[str, int], int] = {}
         for top in top_levels:
             app_class = str(top.client.get("class") or top.client.get("initialClass") or "")
             # Browser app-mode windows are already actionable as exact managed
@@ -434,16 +830,35 @@ class AtspiProvider:
             tabs = tree.native_tabs(top, browser=is_browser)
             if not tabs:
                 continue
+            pid = int(top.client.get("pid") or top.pid)
+            has_atspi_route = all(
+                preferred_action_index(tab.accessible) is not None for tab in tabs
+            )
+            if is_browser and not has_atspi_route:
+                continue
+            candidates.append((top, app_class, is_browser, pid, tabs, has_atspi_route))
+            if not is_browser and not has_atspi_route:
+                key = (app_class.lower(), pid)
+                fallback_top_counts[key] = fallback_top_counts.get(key, 0) + 1
+
+        for top, app_class, is_browser, pid, tabs, has_atspi_route in candidates:
             address = normalized_address(top.client.get("address"))
+            if has_atspi_route:
+                tab_routes = [{"kind": "atspi-action"} for _tab in tabs]
+            else:
+                if fallback_top_counts.get((app_class.lower(), pid)) != 1:
+                    continue
+                tab_routes = self._gtk_action_routes(app_class, pid, top.name, tabs)
+                if not tab_routes or len(tab_routes) != len(tabs):
+                    continue
             if is_browser:
                 browser_addresses.add(address)
-            pid = int(top.client.get("pid") or top.pid)
             birth = process_birth(pid)
             parent = self._window_parent_id(context, address)
             active_window = int(top.client.get("focusHistoryID") or 0) == 0
             kind = "browser-tab" if is_browser else "app-tab"
             provider_name = self._provider_name(app_class, is_browser)
-            for tab in tabs:
+            for tab, tab_route in zip(tabs, tab_routes):
                 item_id = stable_id(self.name, pid, birth, address, tab.native_id)
                 objects[item_id] = tab
                 items.append(
@@ -463,6 +878,7 @@ class AtspiProvider:
                             "pid": pid,
                             "birth": birth,
                             "native_id": tab.native_id,
+                            "tab_route": tab_route,
                         },
                     )
                 )
@@ -495,6 +911,33 @@ class AtspiProvider:
                 return str(client.get("item_id") or "")
         return ""
 
+    @staticmethod
+    def _validated_gtk_tab(
+        tab: NativeTab,
+        native_id: str,
+        route: dict[str, Any],
+    ) -> NativeTab:
+        index = route.get("index")
+        count = route.get("count")
+        if (
+            not isinstance(index, int)
+            or isinstance(index, bool)
+            or not isinstance(count, int)
+            or isinstance(count, bool)
+        ):
+            raise CommandError("native application tab index is invalid")
+        current_tabs = AtspiTree.__new__(AtspiTree).native_tabs(tab.top, browser=False)
+        if (
+            count <= 0
+            or index < 0
+            or index >= count
+            or len(current_tabs) != count
+            or index >= len(current_tabs)
+            or current_tabs[index].native_id != native_id
+        ):
+            raise CommandError("native application tab no longer matches its scan identity")
+        return current_tabs[index]
+
     async def activate(self, activation: dict[str, Any], context: ScanContext) -> None:
         item_id = str(activation.get("item_id") or "")
         tab = self.objects.get(item_id)
@@ -503,9 +946,15 @@ class AtspiProvider:
             # callers normally inject it before dispatch. Fall back to the
             # stable native fingerprint for a just-refreshed provider.
             native_id = str(activation.get("native_id") or "")
-            tab = next((value for value in self.objects.values() if value.native_id == native_id), None)
+            tab = next(
+                (value for value in self.objects.values() if value.native_id == native_id),
+                None,
+            )
         if not tab or has_state(tab.accessible, Atspi.StateType.DEFUNCT):
             raise CommandError("native tab is no longer available")
+        native_id = str(activation.get("native_id") or "")
+        if not native_id or tab.native_id != native_id:
+            raise CommandError("native tab no longer matches its scan identity")
         pid = int(activation.get("pid") or 0)
         if process_birth(pid) != str(activation.get("birth")):
             raise CommandError("native tab process was replaced")
@@ -513,6 +962,18 @@ class AtspiProvider:
         client = context.client_by_address(address)
         if not client or int(client.get("pid") or 0) != pid:
             raise CommandError("native tab window is no longer managed")
-        if not await asyncio.to_thread(invoke_accessible, tab.accessible):
-            raise CommandError("native tab did not expose an activation action")
+        tab_route = activation.get("tab_route")
+        route = dict(tab_route) if isinstance(tab_route, dict) else {}
+        route_kind = str(route.get("kind") or "")
+        if route_kind == "atspi-action":
+            if not await asyncio.to_thread(invoke_accessible_action, tab.accessible):
+                raise CommandError("native tab activation action failed")
+        elif route_kind == "gtk-action":
+            if self.gtk_actions is None:
+                raise CommandError("native application tab action is unavailable")
+            self._validated_gtk_tab(tab, native_id, route)
+            await asyncio.to_thread(self.gtk_actions.activate, route, pid)
+            self._validated_gtk_tab(tab, native_id, route)
+        else:
+            raise CommandError("native tab activation route is invalid")
         await focus_address(context, address)

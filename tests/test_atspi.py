@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
-from everything.commands import CommandRunner
+from everything.commands import CommandError, CommandRunner
 from everything.processes import ProcTable
 from everything.providers.atspi import (
     Atspi,
     AtspiProvider,
     AtspiTree,
     BROWSER_CLASS,
+    GtkActionBus,
     NativeTab,
     TopLevel,
     is_browser_app_mode,
@@ -50,6 +52,7 @@ class FakeAccessible:
         *children,
         selected: bool = False,
         actionable: bool = False,
+        component: object | None = None,
         accessible_id: str = "",
     ) -> None:
         self.role_value = role_value
@@ -57,6 +60,7 @@ class FakeAccessible:
         self.children = list(children)
         self.state = FakeStateSet(selected)
         self.action = FakeAction() if actionable else None
+        self.component = component
         self.accessible_id = accessible_id
 
     def get_role(self):
@@ -81,7 +85,7 @@ class FakeAccessible:
         return self.action
 
     def get_component_iface(self):
-        return object() if self.action else None
+        return self.component
 
     def get_accessible_id(self) -> str:
         return self.accessible_id
@@ -96,6 +100,16 @@ class NativeTabTests(unittest.TestCase):
             name,
             selected=selected,
             actionable=True,
+            accessible_id=identifier,
+        )
+
+    @staticmethod
+    def component_tab(name: str, identifier: str, selected: bool = False) -> FakeAccessible:
+        return FakeAccessible(
+            Atspi.Role.PAGE_TAB,
+            name,
+            selected=selected,
+            component=object(),
             accessible_id=identifier,
         )
 
@@ -127,6 +141,47 @@ class NativeTabTests(unittest.TestCase):
         self.assertEqual([tab.title for tab in tabs], ["First", "Second"])
         self.assertTrue(tabs[0].selected)
 
+    def test_deep_group_wrapped_native_application_tabs_are_accepted(self) -> None:
+        first = self.tab("Home", "native-1", selected=True)
+        second = self.tab("Downloads", "native-2")
+        native = FakeAccessible(
+            Atspi.Role.PAGE_TAB_LIST,
+            "Tab strip",
+            FakeAccessible(Atspi.Role.GROUPING, "", first),
+            FakeAccessible(Atspi.Role.BUTTON, "New tab", actionable=True),
+            FakeAccessible(Atspi.Role.GROUPING, "", second),
+        )
+        nested = native
+        for _index in range(12):
+            nested = FakeAccessible(Atspi.Role.PANEL, "", nested)
+        root = FakeAccessible(Atspi.Role.FRAME, "Application", nested)
+        top = TopLevel(None, root, 10, 0, "Application", {"address": "0xabc"})
+        tree = AtspiTree.__new__(AtspiTree)
+
+        tabs = tree.native_tabs(top, browser=False)
+
+        self.assertEqual([tab.title for tab in tabs], ["Home", "Downloads"])
+        self.assertEqual([tab.index for tab in tabs], [0, 1])
+        self.assertEqual(tabs[0].tab_path[-2:], (0, 0))
+        self.assertEqual(tabs[1].tab_path[-2:], (2, 0))
+        self.assertTrue(tabs[0].selected)
+
+    def test_repeated_toolkit_accessible_ids_use_their_structural_identity(self) -> None:
+        native = FakeAccessible(
+            Atspi.Role.PAGE_TAB_LIST,
+            "Tab strip",
+            self.tab("First", "AdwTab"),
+            self.tab("Second", "AdwTab"),
+        )
+        root = FakeAccessible(Atspi.Role.FRAME, "Application", native)
+        top = TopLevel(None, root, 10, 0, "Application", {"address": "0xabc"})
+        tree = AtspiTree.__new__(AtspiTree)
+
+        tabs = tree.native_tabs(top, browser=False)
+
+        self.assertEqual(len({tab.native_id for tab in tabs}), 2)
+        self.assertTrue(all(tab.native_id.startswith("AdwTab@") for tab in tabs))
+
     def test_current_browser_families_are_recognized(self) -> None:
         classes = (
             "chromium",
@@ -140,7 +195,9 @@ class NativeTabTests(unittest.TestCase):
             "librewolf",
         )
         self.assertTrue(all(BROWSER_CLASS.search(value) for value in classes))
-        self.assertFalse(any(BROWSER_CLASS.search(value) for value in ("Citizen", "ledger", "frozen-app")))
+        self.assertFalse(
+            any(BROWSER_CLASS.search(value) for value in ("Citizen", "ledger", "frozen-app"))
+        )
 
     def test_browser_app_mode_is_distinct_from_normal_and_private_windows(self) -> None:
         app_mode_clients = (
@@ -178,6 +235,127 @@ class NativeTabTests(unittest.TestCase):
         self.assertTrue(invoke_accessible(tab))
         self.assertEqual(tab.action.invoked, [0])
 
+    def test_component_only_native_tab_activates_through_focus(self) -> None:
+        class FakeComponent:
+            focused = False
+
+            def grab_focus(self):
+                self.focused = True
+                return True
+
+        component = FakeComponent()
+        tab = FakeAccessible(Atspi.Role.PAGE_TAB, "Native tab")
+        tab.get_component_iface = lambda: component  # type: ignore[method-assign]
+
+        self.assertTrue(invoke_accessible(tab))
+        self.assertTrue(component.focused)
+
+    def test_pinta_routes_require_one_matching_integer_action(self) -> None:
+        top = TopLevel(None, object(), 42, 0, "Second - Pinta", {})
+        tabs = [
+            NativeTab(object(), top, (0,), (0, index), index, title, False, f"tab-{index}")
+            for index, title in enumerate(("First", "Second"))
+        ]
+        bus = GtkActionBus.__new__(GtkActionBus)
+        bus._pid_destinations = lambda pid: [":1.7"]  # type: ignore[method-assign]
+        bus._describe = lambda *_args: (True, "i", 1)  # type: ignore[method-assign]
+
+        routes = bus.routes(
+            "com.github.PintaProject.Pinta",
+            42,
+            "Second - Pinta",
+            tabs,
+        )
+
+        self.assertIsNotNone(routes)
+        assert routes is not None
+        self.assertEqual(routes[0]["adapter"], "pinta")
+        self.assertEqual(routes[0]["destination"], ":1.7")
+        self.assertEqual([route["index"] for route in routes], [0, 1])
+
+    def test_nautilus_routes_fail_closed_with_multiple_window_action_groups(self) -> None:
+        top = TopLevel(None, object(), 42, 0, "Home", {})
+        tabs = [NativeTab(object(), top, (0,), (0, 0), 0, "Home", False, "tab-0")]
+        bus = GtkActionBus.__new__(GtkActionBus)
+        bus._connection_pid = lambda _destination: 42  # type: ignore[method-assign]
+        bus._window_paths = lambda *_args: [  # type: ignore[method-assign]
+            "/org/gnome/Nautilus/window/1",
+            "/org/gnome/Nautilus/window/2",
+        ]
+        bus._describe = lambda *_args: (True, "i", 0)  # type: ignore[method-assign]
+
+        routes = bus.routes("org.gnome.Nautilus", 42, "Home", tabs)
+
+        self.assertIsNone(routes)
+
+    def test_pinta_action_changes_and_verifies_exact_integer_state(self) -> None:
+        bus = GtkActionBus.__new__(GtkActionBus)
+        states = iter(((True, "i", 0), (True, "i", 1)))
+        calls = []
+        bus._connection_pid = lambda _destination: 42  # type: ignore[method-assign]
+        bus._describe = lambda *_args: next(states)  # type: ignore[method-assign]
+        bus._call = lambda *args: calls.append(args)  # type: ignore[method-assign]
+        route = {
+            "adapter": "pinta",
+            "destination": ":1.7",
+            "object_path": "/com/github/PintaProject/Pinta",
+            "action": "active_document",
+            "index": 1,
+            "count": 2,
+        }
+
+        with patch("everything.providers.atspi.GTK_ACTION_STATE_DELAYS", (0,)):
+            bus.activate(route, 42)
+
+        self.assertEqual(calls[0][3], "SetState")
+        self.assertEqual(calls[0][4].unpack(), ("active_document", 1, {}))
+
+    def test_nautilus_action_activates_exact_integer_parameter(self) -> None:
+        bus = GtkActionBus.__new__(GtkActionBus)
+        calls = []
+        bus._connection_pid = lambda _destination: 42  # type: ignore[method-assign]
+        bus._describe = lambda *_args: (True, "i", 0)  # type: ignore[method-assign]
+        bus._call = lambda *args: calls.append(args)  # type: ignore[method-assign]
+        route = {
+            "adapter": "nautilus",
+            "destination": "org.gnome.Nautilus",
+            "object_path": "/org/gnome/Nautilus/window/1",
+            "action": "go-to-tab",
+            "index": 1,
+            "count": 2,
+        }
+
+        bus.activate(route, 42)
+
+        self.assertEqual(calls[0][3], "Activate")
+        self.assertEqual(calls[0][4].unpack(), ("go-to-tab", [1], {}))
+
+    def test_native_application_action_rejects_owner_and_route_changes(self) -> None:
+        bus = GtkActionBus.__new__(GtkActionBus)
+        bus._connection_pid = lambda _destination: 99  # type: ignore[method-assign]
+        route = {
+            "adapter": "pinta",
+            "destination": ":1.7",
+            "object_path": "/com/github/PintaProject/Pinta",
+            "action": "active_document",
+            "index": 0,
+            "count": 2,
+        }
+
+        with self.assertRaisesRegex(CommandError, "owner changed"):
+            bus.activate(route, 42)
+        bus._connection_pid = lambda _destination: 42  # type: ignore[method-assign]
+        bus._describe = lambda *_args: (True, "s", 0)  # type: ignore[method-assign]
+        with self.assertRaisesRegex(CommandError, "action changed"):
+            bus.activate(route, 42)
+        route["action"] = "other"
+        with self.assertRaisesRegex(CommandError, "route is invalid"):
+            bus.activate(route, 42)
+        route["action"] = "active_document"
+        route["index"] = "not-an-index"
+        with self.assertRaisesRegex(CommandError, "index is invalid"):
+            bus.activate(route, 42)
+
     def test_provider_retries_first_seen_browser_until_tabs_are_available(self) -> None:
         client = {
             "address": "0xabc",
@@ -187,8 +365,9 @@ class NativeTabTests(unittest.TestCase):
             "focusHistoryID": 0,
         }
         top = TopLevel(None, object(), 42, 0, client["title"], client)
+        accessible = self.tab("Current page", "native-tab-1", selected=True)
         tab = NativeTab(
-            accessible=object(),
+            accessible=accessible,
             top=top,
             strip_path=(0,),
             tab_path=(0, 0),
@@ -231,6 +410,356 @@ class NativeTabTests(unittest.TestCase):
         self.assertEqual(result.items[0].title, "Current page")
         self.assertEqual(result.items[0].parent_id, "hyprland:window")
         self.assertEqual(result.items[0].activation["address"], "0xabc")
+        self.assertEqual(result.items[0].activation["tab_route"], {"kind": "atspi-action"})
+
+    def test_provider_keeps_uncovered_browser_eligible_for_later_settling(self) -> None:
+        client = {
+            "address": "0xabc",
+            "pid": 42,
+            "class": "chromium",
+            "title": "Current page - Chromium",
+            "focusHistoryID": 0,
+        }
+        top = TopLevel(None, object(), 42, 0, client["title"], client)
+        accessible = self.tab("Current page", "native-tab-1", selected=True)
+        tab = NativeTab(
+            accessible=accessible,
+            top=top,
+            strip_path=(0,),
+            tab_path=(0, 0),
+            index=0,
+            title="Current page",
+            selected=True,
+            native_id="native-tab-1",
+        )
+
+        class DelayedAcrossScansTree:
+            scans = 0
+
+            def top_levels(self, _context):
+                return [top]
+
+            def native_tabs(self, _top, *, browser):
+                self.__class__.scans += 1
+                return [tab] if browser and self.__class__.scans >= 4 else []
+
+        context = ScanContext(
+            runner=CommandRunner(),
+            processes=ProcTable({}),
+            hypr_clients=[client],
+        )
+        provider = AtspiProvider()
+
+        with patch("everything.providers.atspi.AtspiTree", DelayedAcrossScansTree), patch(
+            "everything.providers.atspi.BROWSER_SETTLE_DELAYS", (0,)
+        ), patch("everything.providers.atspi.process_birth", return_value="birth"):
+            first = provider._scan_sync(context)
+            self.assertEqual(first.items, [])
+            self.assertEqual(provider.settled_browser_clients, set())
+
+            second = provider._scan_sync(context)
+
+        self.assertEqual(DelayedAcrossScansTree.scans, 4)
+        self.assertEqual([item.title for item in second.items], ["Current page"])
+        self.assertEqual(
+            provider.settled_browser_clients,
+            {("0xabc", 42, "birth")},
+        )
+
+    def test_provider_retries_when_a_settled_browser_temporarily_loses_coverage(self) -> None:
+        client = {
+            "address": "0xabc",
+            "pid": 42,
+            "class": "chromium",
+            "title": "Current page - Chromium",
+            "focusHistoryID": 0,
+        }
+        top = TopLevel(None, object(), 42, 0, client["title"], client)
+        accessible = self.tab("Current page", "native-tab-1", selected=True)
+        tab = NativeTab(
+            accessible=accessible,
+            top=top,
+            strip_path=(0,),
+            tab_path=(0, 0),
+            index=0,
+            title="Current page",
+            selected=True,
+            native_id="native-tab-1",
+        )
+
+        class IntermittentTree:
+            scans = 0
+
+            def top_levels(self, _context):
+                return [top]
+
+            def native_tabs(self, _top, *, browser):
+                self.__class__.scans += 1
+                return [tab] if browser and self.__class__.scans != 2 else []
+
+        context = ScanContext(
+            runner=CommandRunner(),
+            processes=ProcTable({}),
+            hypr_clients=[client],
+        )
+        provider = AtspiProvider()
+
+        with patch("everything.providers.atspi.AtspiTree", IntermittentTree), patch(
+            "everything.providers.atspi.BROWSER_SETTLE_DELAYS", (0,)
+        ), patch("everything.providers.atspi.process_birth", return_value="birth"):
+            first = provider._scan_sync(context)
+            second = provider._scan_sync(context)
+
+        self.assertEqual([item.title for item in first.items], ["Current page"])
+        self.assertEqual([item.title for item in second.items], ["Current page"])
+        self.assertEqual(IntermittentTree.scans, 3)
+
+    def test_provider_emits_distinct_deep_wrapped_application_tabs(self) -> None:
+        client = {
+            "address": "0xabc",
+            "pid": 42,
+            "class": "org.gnome.Nautilus",
+            "title": "Home",
+            "focusHistoryID": 0,
+        }
+        native = FakeAccessible(
+            Atspi.Role.PAGE_TAB_LIST,
+            "Tab strip",
+            FakeAccessible(
+                Atspi.Role.GROUPING,
+                "",
+                self.component_tab("Home", "AdwTab", selected=True),
+            ),
+            FakeAccessible(
+                Atspi.Role.GROUPING,
+                "",
+                self.component_tab("Downloads", "AdwTab"),
+            ),
+        )
+        nested = native
+        for _index in range(12):
+            nested = FakeAccessible(Atspi.Role.PANEL, "", nested)
+        root = FakeAccessible(Atspi.Role.FRAME, "Home", nested)
+        top = TopLevel(None, root, 42, 0, "Home", client)
+        tree = AtspiTree.__new__(AtspiTree)
+        tree.top_levels = lambda _context: [top]  # type: ignore[method-assign]
+        context = ScanContext(
+            runner=CommandRunner(),
+            processes=ProcTable({}),
+            hypr_clients=[client],
+            provider_metadata={
+                "hyprland": {
+                    "clients": [{"address": "0xabc", "item_id": "hyprland:window"}]
+                }
+            },
+        )
+        provider = AtspiProvider()
+
+        class FakeGtkActions:
+            def routes(self, app_class, pid, top_name, tabs):
+                self.observed = (app_class, pid, top_name)
+                return GtkActionBus._routes(
+                    "nautilus",
+                    "org.gnome.Nautilus",
+                    "/org/gnome/Nautilus/window/1",
+                    "go-to-tab",
+                    tabs,
+                )
+
+        actions = FakeGtkActions()
+        provider.gtk_actions = actions  # type: ignore[assignment]
+
+        with patch("everything.providers.atspi.AtspiTree", return_value=tree), patch(
+            "everything.providers.atspi.process_birth", return_value="birth"
+        ):
+            result = provider._scan_sync(context)
+
+        self.assertEqual([item.kind for item in result.items], ["app-tab", "app-tab"])
+        self.assertEqual([item.title for item in result.items], ["Home", "Downloads"])
+        self.assertEqual({item.parent_id for item in result.items}, {"hyprland:window"})
+        self.assertEqual(len({item.id for item in result.items}), 2)
+        self.assertEqual(len(provider.objects), 2)
+        self.assertEqual(
+            result.items[1].activation["tab_route"],
+            {
+                "kind": "gtk-action",
+                "adapter": "nautilus",
+                "destination": "org.gnome.Nautilus",
+                "object_path": "/org/gnome/Nautilus/window/1",
+                "action": "go-to-tab",
+                "index": 1,
+                "count": 2,
+            },
+        )
+        self.assertEqual(
+            actions.observed,
+            ("org.gnome.Nautilus", 42, "Home"),
+        )
+
+    def test_provider_omits_component_only_tabs_without_a_native_route(self) -> None:
+        client = {
+            "address": "0xabc",
+            "pid": 42,
+            "class": "org.example.Editor",
+            "title": "First",
+            "focusHistoryID": 0,
+        }
+        native = FakeAccessible(
+            Atspi.Role.PAGE_TAB_LIST,
+            "Tab strip",
+            self.component_tab("First", "tab-1", selected=True),
+            self.component_tab("Second", "tab-2"),
+        )
+        root = FakeAccessible(Atspi.Role.FRAME, "First", native)
+        top = TopLevel(None, root, 42, 0, "First", client)
+        tree = AtspiTree.__new__(AtspiTree)
+        tree.top_levels = lambda _context: [top]  # type: ignore[method-assign]
+        context = ScanContext(
+            runner=CommandRunner(),
+            processes=ProcTable({}),
+            hypr_clients=[client],
+        )
+        provider = AtspiProvider()
+
+        class NoRoutes:
+            def routes(self, *_args):
+                return None
+
+        provider.gtk_actions = NoRoutes()  # type: ignore[assignment]
+        with patch("everything.providers.atspi.AtspiTree", return_value=tree):
+            result = provider._scan_sync(context)
+
+        self.assertEqual(result.items, [])
+        self.assertEqual(provider.objects, {})
+
+    def test_provider_omits_ambiguous_component_routes_for_two_app_windows(self) -> None:
+        clients = [
+            {
+                "address": f"0xabc{index}",
+                "pid": 42,
+                "class": "org.gnome.Nautilus",
+                "title": title,
+                "focusHistoryID": index,
+            }
+            for index, title in enumerate(("Home", "Downloads"))
+        ]
+        tops = [
+            TopLevel(None, object(), 42, index, client["title"], client)
+            for index, client in enumerate(clients)
+        ]
+        tabs = {
+            id(top): [
+                NativeTab(
+                    self.component_tab(top.name, f"tab-{index}"),
+                    top,
+                    (0,),
+                    (0, 0),
+                    0,
+                    top.name,
+                    True,
+                    f"tab-{index}",
+                )
+            ]
+            for index, top in enumerate(tops)
+        }
+
+        class MultipleTree:
+            def top_levels(self, _context):
+                return tops
+
+            def native_tabs(self, top, *, browser):
+                return tabs[id(top)]
+
+        class UnexpectedRoutes:
+            def routes(self, *_args):
+                raise AssertionError("ambiguous application windows must not be routed")
+
+        provider = AtspiProvider()
+        provider.gtk_actions = UnexpectedRoutes()  # type: ignore[assignment]
+        context = ScanContext(
+            runner=CommandRunner(),
+            processes=ProcTable({}),
+            hypr_clients=clients,
+        )
+
+        with patch("everything.providers.atspi.AtspiTree", MultipleTree):
+            result = provider._scan_sync(context)
+
+        self.assertEqual(result.items, [])
+
+    def test_provider_activates_and_revalidates_native_application_tab(self) -> None:
+        client = {
+            "address": "0xabc",
+            "pid": 42,
+            "class": "org.gnome.Nautilus",
+            "title": "Home",
+            "focusHistoryID": 0,
+        }
+        native = FakeAccessible(
+            Atspi.Role.PAGE_TAB_LIST,
+            "Tab strip",
+            self.component_tab("Home", "tab-1", selected=True),
+            self.component_tab("Downloads", "tab-2"),
+        )
+        root = FakeAccessible(Atspi.Role.FRAME, "Home", native)
+        top = TopLevel(None, root, 42, 0, "Home", client)
+        tabs = AtspiTree.__new__(AtspiTree).native_tabs(top, browser=False)
+        target = tabs[1]
+        events = []
+
+        class FakeGtkActions:
+            def activate(self, route, pid):
+                events.append(("activate", route["index"], pid))
+
+        async def record_focus(_context, address):
+            events.append(("focus", address))
+
+        provider = AtspiProvider()
+        provider.objects = {"item": target}
+        provider.gtk_actions = FakeGtkActions()  # type: ignore[assignment]
+        context = ScanContext(
+            runner=CommandRunner(),
+            processes=ProcTable({}),
+            hypr_clients=[client],
+        )
+        activation = {
+            "item_id": "item",
+            "native_id": target.native_id,
+            "address": "0xabc",
+            "pid": 42,
+            "birth": "birth",
+            "tab_route": {
+                "kind": "gtk-action",
+                "adapter": "nautilus",
+                "destination": "org.gnome.Nautilus",
+                "object_path": "/org/gnome/Nautilus/window/1",
+                "action": "go-to-tab",
+                "index": 1,
+                "count": 2,
+            },
+        }
+
+        with patch("everything.providers.atspi.process_birth", return_value="birth"), patch(
+            "everything.providers.atspi.focus_address",
+            new=AsyncMock(side_effect=record_focus),
+        ):
+            asyncio.run(provider.activate(activation, context))
+
+        self.assertEqual(events, [("activate", 1, 42), ("focus", "0xabc")])
+
+    def test_provider_rejects_reordered_native_application_tab(self) -> None:
+        first = self.component_tab("First", "tab-1", selected=True)
+        second = self.component_tab("Second", "tab-2")
+        native = FakeAccessible(Atspi.Role.PAGE_TAB_LIST, "Tab strip", first, second)
+        root = FakeAccessible(Atspi.Role.FRAME, "First", native)
+        top = TopLevel(None, root, 42, 0, "First", {"address": "0xabc"})
+        target = AtspiTree.__new__(AtspiTree).native_tabs(top, browser=False)[1]
+        route = {"index": 1, "count": 2}
+
+        native.children.reverse()
+
+        with self.assertRaisesRegex(CommandError, "scan identity"):
+            AtspiProvider._validated_gtk_tab(target, target.native_id, route)
 
     def test_provider_omits_app_mode_tabs_without_reclassifying_them(self) -> None:
         normal_client = {
@@ -253,6 +782,8 @@ class NativeTabTests(unittest.TestCase):
         }
         normal_top = TopLevel(None, object(), 42, 0, normal_client["title"], normal_client)
         app_top = TopLevel(None, object(), 42, 1, app_client["title"], app_client)
+        normal_accessible = self.tab("Normal tab", "normal-tab", selected=True)
+        app_accessible = self.tab("App-mode tab", "app-tab", selected=True)
 
         class MixedTree:
             def top_levels(self, _context):
@@ -261,7 +792,7 @@ class NativeTabTests(unittest.TestCase):
             def native_tabs(self, top, *, browser):
                 return [
                     NativeTab(
-                        accessible=object(),
+                        accessible=(normal_accessible if top is normal_top else app_accessible),
                         top=top,
                         strip_path=(0,),
                         tab_path=(0, 0),

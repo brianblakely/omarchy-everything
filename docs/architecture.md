@@ -137,6 +137,14 @@ never on the normal poll. The panel exposes no manual scan control.
 Each adapter returns `ProviderResult`: public `Thing` values, nonfatal
 warnings, and private routing metadata. Adapter failure removes only that
 adapter's internal rows; an outer managed-window result remains available.
+The AT-SPI adapter owns native-tab structural validation, browser settling,
+and the private capability-tested GTK action routes used by current Pinta and
+Nautilus. Those action destinations, object paths, names, and integer indexes
+remain inside the opaque activation token. An exact browser client remains
+eligible for bounded retries on later polls until its own actionable native
+tab strip is observed; merely exhausting one settle pass does not make an
+empty accessibility frame authoritative. A later scan that loses previously
+observed coverage makes that client retryable again.
 
 ## Identity and activation
 

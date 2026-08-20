@@ -38,9 +38,14 @@ The suite performs:
 - partial provider streaming, provider failure isolation, stale-row removal,
   and scan cancellation propagation;
 - AT-SPI state restoration without screen-reader writes, browser-family
-  matching, bounded first-seen browser settling, emitted browser-tab rows,
-  app-mode exclusion, native default-action activation, and exclusion of
-  document-authored/tool tab strips;
+  matching, repeated bounded settling until exact browser coverage and after
+  transient coverage loss, emitted browser-tab rows, app-mode exclusion,
+  native default-action activation, deep GTK 4 tab lists with one transparent
+  grouping wrapper, repeated toolkit accessibility IDs, rejection of generic
+  component-only tabs, capability-tested Pinta/Nautilus action routes,
+  D-Bus owner/action/signature/index validation, pre/post native-identity
+  checks, multi-window ambiguity, and exclusion of document-authored/tool tab
+  strips;
 - Hyprland mapped/hidden/group/scratchpad handling and Herdr protocol-20 shape;
 - Ghostty effective-binding filtering, 9+ virtualized rows, duplicate
   fingerprint occurrences, fail-closed mutations, and exact-address paired
@@ -123,8 +128,13 @@ single refresh followed by a visible stale notification.
   window rows but produce neither browser-tab nor application-tab rows.
 - A test page containing ARIA `tablist`/`tab` elements plus browser developer
   tools. Confirm neither page-authored nor tool tabs appear.
-- A GTK/Qt application with genuine native tabs and an editor/web app with DOM
-  tabs. Confirm only the former expands and both retain outer-window rows.
+- Current Nautilus and Pinta with multiple native tabs, plus another GTK/Qt
+  application with genuine native tabs and an editor/web app with DOM tabs.
+  Confirm the deep, grouping-wrapped Nautilus/Pinta strips expand, only native
+  application tabs become rows, duplicate toolkit accessibility IDs remain
+  distinct, every row switches to the exact tab, and every application retains
+  its outer-window row. Open two Nautilus windows and confirm their ambiguous
+  component-only tabs disappear while both outer-window rows remain.
 - Confirm browser rows are title-only and never claim a URL or favicon.
 
 ### Kitty and Ghostty

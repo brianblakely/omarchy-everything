@@ -93,9 +93,32 @@ parent pipe EOF after a crash, the guard restores the original `IsEnabled`
 value. If another actor changes screen-reader mode meanwhile, that choice is
 left untouched.
 
-AT-SPI reads application/window/tab names, roles, state, actions, and native
-tab accessibility IDs. It invokes only a selected live native tab's activation
-action and the capability-tested Ghostty palette action.
+AT-SPI reads application/window/tab names, roles, state, actions, remote object
+paths, and native tab accessibility IDs. Native-tab traversal crosses at most
+one transparent `GROUPING` wrapper beneath a tab list and never crosses a
+document subtree. Browser and generic application rows invoke only the chosen
+live native tab's exposed preferred action. Component focus is not treated as
+a generic tab activation capability; its remaining use is inside Ghostty's
+separately capability-tested palette bridge.
+
+## Session D-Bus GTK actions
+
+The Pinta and Nautilus adapters make bounded calls on the existing user
+session bus. Every call uses `NO_AUTO_START` and a 500 ms timeout. Discovery
+may read at most 512 existing bus names and their
+`GetConnectionUnixProcessID` values, `org.gtk.Actions.Describe`, and up to
+64 KiB of Nautilus window-node introspection. It accepts at most 64 numeric
+window paths.
+
+The only mutating calls are Pinta `active_document` through
+`org.gtk.Actions.SetState` and Nautilus `go-to-tab` through
+`org.gtk.Actions.Activate`, each with one validated integer tab index. Pinta's
+unique bus destination and Nautilus's well-known owner must match the managed
+window PID; ownership and the exact object path, action, signature, count,
+index, and AT-SPI native identity are revalidated at activation. Pinta's final
+action state is also verified. Multiple eligible Pinta connections or
+Nautilus window action groups fail closed. No arbitrary application action is
+accepted, and D-Bus activation never starts an application.
 
 ## Ghostty palette and synthetic keys
 
