@@ -333,9 +333,9 @@ const item = (id, title, context, extra = {}) => ({
     item("browser", "Site", "Browser · native tab", { kind: "browser-tab", provider: "Firefox", badges: ["Tab", "Title only"] }), ""),
     "Firefox")
   assert.equal(sandbox.vitalMetadata(
-    item("app-tab", "Downloads", "Home · native tab", {
-      kind: "app-tab", provider: "Files", badges: ["Tab", "Native"],
-    }), ""), "Files", "application-tab metadata names its owning app")
+    item("app-tab", "Layered image", "Layered image · native tab", {
+      kind: "app-tab", provider: "Pinta", badges: ["Tab", "Native"],
+    }), ""), "Pinta", "application-tab metadata names its owning app")
   assert.equal(sandbox.vitalMetadata(
     item("pane", "Shell", "/src", { kind: "terminal-pane", badges: ["Pane"] }), "Project › /src"),
     "Project › /src")

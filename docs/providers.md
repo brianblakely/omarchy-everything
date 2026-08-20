@@ -56,10 +56,10 @@ GTK/Qt applications must expose both the bounded native structure above and a
 preferred AT-SPI tab action. A component interface alone is not an activation
 guarantee and does not make a generic application tab a thing.
 DOM/editor tabs with no reliable external adapter remain represented by their
-outer window. An application-tab row uses its owning AT-SPI application's
-cleaned accessible name as its provider and displayed metadata, falling back
-to the final component of the managed application class when that name is not
-available.
+outer window. An application-tab row uses the final component of its managed
+application class as its provider and displayed metadata. This preserves the
+owning app's name when a toolkit exposes only a runtime name such as Pinta's
+`dotnet` AT-SPI application.
 
 AT-SPI exposes titles. URLs, favicons, and browser history are not part of the
 0.0.1 contract. The browser-side assumptions are intentionally limited to the
@@ -77,9 +77,11 @@ two exact `org.gtk.Actions` adapters instead:
 
 - Pinta must have exactly one session-bus connection owned by its managed PID
   that exports the integer `active_document` action at
-  `/com/github/PintaProject/Pinta`. Its live state must identify the tab named
-  by the matched top-level window. Activation changes that state to the exact
-  tab index and polls until the exported state confirms it.
+  `/com/github/PintaProject/Pinta`. Current Pinta exposes its AT-SPI tab order
+  in reverse of its document-action order, so the reversed live state must
+  identify the tab named by the matched top-level window. Activation invokes
+  `active_document` with that validated reverse-mapped index and polls until
+  the exported state confirms it.
 - Nautilus must own `org.gnome.Nautilus` and expose exactly one enabled integer
   `go-to-tab` action under `/org/gnome/Nautilus/window/<number>`. Nautilus does
   not update that action's exported state with tab selection, so more than one

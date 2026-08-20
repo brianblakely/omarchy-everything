@@ -250,7 +250,7 @@ class NativeTabTests(unittest.TestCase):
         self.assertTrue(invoke_accessible(tab))
         self.assertTrue(component.focused)
 
-    def test_pinta_routes_require_one_matching_integer_action(self) -> None:
+    def test_pinta_routes_reverse_atspi_indexes_for_the_matching_action(self) -> None:
         top = TopLevel(None, object(), 42, 0, "Second - Pinta", {})
         tabs = [
             NativeTab(object(), top, (0,), (0, index), index, title, False, f"tab-{index}")
@@ -258,7 +258,7 @@ class NativeTabTests(unittest.TestCase):
         ]
         bus = GtkActionBus.__new__(GtkActionBus)
         bus._pid_destinations = lambda pid: [":1.7"]  # type: ignore[method-assign]
-        bus._describe = lambda *_args: (True, "i", 1)  # type: ignore[method-assign]
+        bus._describe = lambda *_args: (True, "i", 0)  # type: ignore[method-assign]
 
         routes = bus.routes(
             "com.github.PintaProject.Pinta",
@@ -272,6 +272,21 @@ class NativeTabTests(unittest.TestCase):
         self.assertEqual(routes[0]["adapter"], "pinta")
         self.assertEqual(routes[0]["destination"], ":1.7")
         self.assertEqual([route["index"] for route in routes], [0, 1])
+        self.assertEqual([route["action_index"] for route in routes], [1, 0])
+
+    def test_pinta_routes_reject_a_prefix_only_state_match(self) -> None:
+        top = TopLevel(None, object(), 42, 0, "Second draft - Pinta", {})
+        tabs = [
+            NativeTab(object(), top, (0,), (0, index), index, title, False, f"tab-{index}")
+            for index, title in enumerate(("Second", "Second draft"))
+        ]
+        bus = GtkActionBus.__new__(GtkActionBus)
+        bus._pid_destinations = lambda pid: [":1.7"]  # type: ignore[method-assign]
+        bus._describe = lambda *_args: (True, "i", 1)  # type: ignore[method-assign]
+
+        self.assertIsNone(
+            bus.routes("com.github.PintaProject.Pinta", 42, top.name, tabs)
+        )
 
     def test_nautilus_routes_fail_closed_with_multiple_window_action_groups(self) -> None:
         top = TopLevel(None, object(), 42, 0, "Home", {})
@@ -300,15 +315,16 @@ class NativeTabTests(unittest.TestCase):
             "destination": ":1.7",
             "object_path": "/com/github/PintaProject/Pinta",
             "action": "active_document",
-            "index": 1,
+            "index": 0,
+            "action_index": 1,
             "count": 2,
         }
 
         with patch("everything.providers.atspi.GTK_ACTION_STATE_DELAYS", (0,)):
             bus.activate(route, 42)
 
-        self.assertEqual(calls[0][3], "SetState")
-        self.assertEqual(calls[0][4].unpack(), ("active_document", 1, {}))
+        self.assertEqual(calls[0][3], "Activate")
+        self.assertEqual(calls[0][4].unpack(), ("active_document", [1], {}))
 
     def test_nautilus_action_activates_exact_integer_parameter(self) -> None:
         bus = GtkActionBus.__new__(GtkActionBus)
@@ -339,6 +355,7 @@ class NativeTabTests(unittest.TestCase):
             "object_path": "/com/github/PintaProject/Pinta",
             "action": "active_document",
             "index": 0,
+            "action_index": 1,
             "count": 2,
         }
 
@@ -352,6 +369,10 @@ class NativeTabTests(unittest.TestCase):
         with self.assertRaisesRegex(CommandError, "route is invalid"):
             bus.activate(route, 42)
         route["action"] = "active_document"
+        route["action_index"] = 0
+        with self.assertRaisesRegex(CommandError, "route is invalid"):
+            bus.activate(route, 42)
+        route["action_index"] = 1
         route["index"] = "not-an-index"
         with self.assertRaisesRegex(CommandError, "index is invalid"):
             bus.activate(route, 42)
@@ -540,8 +561,7 @@ class NativeTabTests(unittest.TestCase):
         for _index in range(12):
             nested = FakeAccessible(Atspi.Role.PANEL, "", nested)
         root = FakeAccessible(Atspi.Role.FRAME, "Home", nested)
-        application = FakeAccessible(Atspi.Role.APPLICATION, "Files")
-        top = TopLevel(application, root, 42, 0, "Home", client)
+        top = TopLevel(None, root, 42, 0, "Home", client)
         tree = AtspiTree.__new__(AtspiTree)
         tree.top_levels = lambda _context: [top]  # type: ignore[method-assign]
         context = ScanContext(
@@ -577,7 +597,7 @@ class NativeTabTests(unittest.TestCase):
 
         self.assertEqual([item.kind for item in result.items], ["app-tab", "app-tab"])
         self.assertEqual([item.title for item in result.items], ["Home", "Downloads"])
-        self.assertEqual({item.provider for item in result.items}, {"Files"})
+        self.assertEqual({item.provider for item in result.items}, {"Nautilus"})
         self.assertEqual({item.parent_id for item in result.items}, {"hyprland:window"})
         self.assertEqual(len({item.id for item in result.items}), 2)
         self.assertEqual(len(provider.objects), 2)

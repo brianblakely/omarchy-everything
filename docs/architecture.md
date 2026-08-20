@@ -111,11 +111,11 @@ line. Herdr agent rows reuse the shell's agent-usage robot glyph. Kind labels
 are excluded from metadata;
 provider-specific kind-bearing fallbacks are reduced to their useful identity
 or location before display. Browser tabs show their browser family, while
-application tabs show the cleaned AT-SPI name of the application that owns
-them, with the compact application-class suffix as a fallback. Badge
-normalization accepts both JavaScript arrays and Qt typed lists, including
-their comma-joined bridge representation, before the kind filter runs. The
-model indexes the complete public parent graph once
+application tabs show the compact name from the managed application class that
+owns them; toolkit process names such as Pinta's `dotnet` AT-SPI name are not
+shown. Badge normalization accepts both JavaScript arrays and Qt typed lists,
+including their comma-joined bridge representation, before the kind filter
+runs. The model indexes the complete public parent graph once
 per source update; both ranking and QML use that same index for breadcrumbs and
 tmux window/pane and Herdr workspace/tab/pane metadata. These child rows show
 only their immediate parent's title, while agent and session metadata retain

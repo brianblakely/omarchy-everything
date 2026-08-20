@@ -110,15 +110,16 @@ may read at most 512 existing bus names and their
 64 KiB of Nautilus window-node introspection. It accepts at most 64 numeric
 window paths.
 
-The only mutating calls are Pinta `active_document` through
-`org.gtk.Actions.SetState` and Nautilus `go-to-tab` through
-`org.gtk.Actions.Activate`, each with one validated integer tab index. Pinta's
-unique bus destination and Nautilus's well-known owner must match the managed
-window PID; ownership and the exact object path, action, signature, count,
-index, and AT-SPI native identity are revalidated at activation. Pinta's final
-action state is also verified. Multiple eligible Pinta connections or
-Nautilus window action groups fail closed. No arbitrary application action is
-accepted, and D-Bus activation never starts an application.
+The only mutating calls are Pinta `active_document` and Nautilus `go-to-tab`
+through `org.gtk.Actions.Activate`, each with one validated integer parameter.
+Pinta's action index must be the exact reverse mapping of the separately
+validated AT-SPI tab index. Pinta's unique bus destination and Nautilus's
+well-known owner must match the managed window PID; ownership and the exact
+object path, action, signature, count, indexes, and AT-SPI native identity are
+revalidated at activation. Pinta's final action state is also verified.
+Multiple eligible Pinta connections or Nautilus window action groups fail
+closed. No arbitrary application action is accepted, and D-Bus activation
+never starts an application.
 
 ## Ghostty palette and synthetic keys
 
