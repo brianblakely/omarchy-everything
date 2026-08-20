@@ -395,26 +395,20 @@ class GtkActionBus:
                     enabled, signature, state = self._describe(
                         destination, object_path, "active_document"
                     )
-                    # Pinta's current libadwaita accessibility children are
-                    # exposed in the reverse of its active_document order.
-                    native_state = len(tabs) - 1 - state
                     if (
                         enabled
                         and signature == "i"
-                        and self._state_matches_top(tabs, native_state, top_name)
+                        and self._state_matches_top(tabs, state, top_name)
                     ):
                         candidates.append((destination, object_path))
                 if len(candidates) == 1:
-                    routes = self._routes(
+                    return self._routes(
                         "pinta",
                         candidates[0][0],
                         candidates[0][1],
                         "active_document",
                         tabs,
                     )
-                    for route in routes:
-                        route["action_index"] = len(tabs) - 1 - route["index"]
-                    return routes
                 return None
 
             if value == "org.gnome.nautilus":
@@ -448,30 +442,25 @@ class GtkActionBus:
     @staticmethod
     def _validate_route(
         route: dict[str, Any],
-    ) -> tuple[str, str, str, str, int, int, int]:
+    ) -> tuple[str, str, str, str, int, int]:
         adapter = str(route.get("adapter") or "")
         destination = str(route.get("destination") or "")
         object_path = str(route.get("object_path") or "")
         action = str(route.get("action") or "")
         index = route.get("index")
-        action_index = route.get("action_index", index)
         count = route.get("count")
         if (
             not isinstance(index, int)
             or isinstance(index, bool)
-            or not isinstance(action_index, int)
-            or isinstance(action_index, bool)
             or not isinstance(count, int)
             or isinstance(count, bool)
         ):
             raise CommandError("native application tab index is invalid")
         if (
             index < 0
-            or action_index < 0
             or count <= 0
             or count > 256
             or index >= count
-            or action_index >= count
         ):
             raise CommandError("native application tab index is invalid")
         if adapter == "pinta":
@@ -479,7 +468,6 @@ class GtkActionBus:
                 not re.fullmatch(r":[0-9]{1,10}\.[0-9]{1,10}", destination)
                 or object_path != "/com/github/PintaProject/Pinta"
                 or action != "active_document"
-                or action_index != count - 1 - index
             ):
                 raise CommandError("Pinta tab route is invalid")
         elif adapter == "nautilus":
@@ -487,23 +475,16 @@ class GtkActionBus:
                 destination != "org.gnome.Nautilus"
                 or not NAUTILUS_WINDOW_PATH.fullmatch(object_path)
                 or action != "go-to-tab"
-                or action_index != index
             ):
                 raise CommandError("Nautilus tab route is invalid")
         else:
             raise CommandError("native application tab route is unsupported")
-        return adapter, destination, object_path, action, index, action_index, count
+        return adapter, destination, object_path, action, index, count
 
     def activate(self, route: dict[str, Any], pid: int) -> None:
-        (
-            adapter,
-            destination,
-            object_path,
-            action,
-            _index,
-            action_index,
-            count,
-        ) = self._validate_route(route)
+        adapter, destination, object_path, action, index, count = self._validate_route(
+            route
+        )
         try:
             if self._connection_pid(destination) != pid:
                 raise CommandError("native application action owner changed")
@@ -518,13 +499,13 @@ class GtkActionBus:
                     "Activate",
                     GLib.Variant(
                         "(sava{sv})",
-                        (action, [GLib.Variant("i", action_index)], {}),
+                        (action, [GLib.Variant("i", index)], {}),
                     ),
                 )
                 return
             if state < 0 or state >= count:
                 raise CommandError("native application tab action changed")
-            if state == action_index:
+            if state == index:
                 return
             self._call(
                 destination,
@@ -533,7 +514,7 @@ class GtkActionBus:
                 "Activate",
                 GLib.Variant(
                     "(sava{sv})",
-                    (action, [GLib.Variant("i", action_index)], {}),
+                    (action, [GLib.Variant("i", index)], {}),
                 ),
             )
             for delay in GTK_ACTION_STATE_DELAYS:
@@ -544,7 +525,7 @@ class GtkActionBus:
                     object_path,
                     action,
                 )
-                if enabled and signature == "i" and state == action_index:
+                if enabled and signature == "i" and state == index:
                     return
         except CommandError:
             raise

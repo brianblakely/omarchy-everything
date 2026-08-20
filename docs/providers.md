@@ -77,10 +77,9 @@ two exact `org.gtk.Actions` adapters instead:
 
 - Pinta must have exactly one session-bus connection owned by its managed PID
   that exports the integer `active_document` action at
-  `/com/github/PintaProject/Pinta`. Current Pinta exposes its AT-SPI tab order
-  in reverse of its document-action order, so the reversed live state must
-  identify the tab named by the matched top-level window. Activation invokes
-  `active_document` with that validated reverse-mapped index and polls until
+  `/com/github/PintaProject/Pinta`. Its live state must identify the same tab
+  index and exact title exposed by the matched AT-SPI top level. Activation
+  invokes `active_document` with that validated direct index and polls until
   the exported state confirms it.
 - Nautilus must own `org.gnome.Nautilus` and expose exactly one enabled integer
   `go-to-tab` action under `/org/gnome/Nautilus/window/<number>`. Nautilus does

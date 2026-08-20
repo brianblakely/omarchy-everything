@@ -250,7 +250,7 @@ class NativeTabTests(unittest.TestCase):
         self.assertTrue(invoke_accessible(tab))
         self.assertTrue(component.focused)
 
-    def test_pinta_routes_reverse_atspi_indexes_for_the_matching_action(self) -> None:
+    def test_pinta_routes_use_direct_atspi_indexes_for_matching_action(self) -> None:
         top = TopLevel(None, object(), 42, 0, "Second - Pinta", {})
         tabs = [
             NativeTab(object(), top, (0,), (0, index), index, title, False, f"tab-{index}")
@@ -258,7 +258,7 @@ class NativeTabTests(unittest.TestCase):
         ]
         bus = GtkActionBus.__new__(GtkActionBus)
         bus._pid_destinations = lambda pid: [":1.7"]  # type: ignore[method-assign]
-        bus._describe = lambda *_args: (True, "i", 0)  # type: ignore[method-assign]
+        bus._describe = lambda *_args: (True, "i", 1)  # type: ignore[method-assign]
 
         routes = bus.routes(
             "com.github.PintaProject.Pinta",
@@ -272,7 +272,6 @@ class NativeTabTests(unittest.TestCase):
         self.assertEqual(routes[0]["adapter"], "pinta")
         self.assertEqual(routes[0]["destination"], ":1.7")
         self.assertEqual([route["index"] for route in routes], [0, 1])
-        self.assertEqual([route["action_index"] for route in routes], [1, 0])
 
     def test_pinta_routes_reject_a_prefix_only_state_match(self) -> None:
         top = TopLevel(None, object(), 42, 0, "Second draft - Pinta", {})
@@ -282,7 +281,7 @@ class NativeTabTests(unittest.TestCase):
         ]
         bus = GtkActionBus.__new__(GtkActionBus)
         bus._pid_destinations = lambda pid: [":1.7"]  # type: ignore[method-assign]
-        bus._describe = lambda *_args: (True, "i", 1)  # type: ignore[method-assign]
+        bus._describe = lambda *_args: (True, "i", 0)  # type: ignore[method-assign]
 
         self.assertIsNone(
             bus.routes("com.github.PintaProject.Pinta", 42, top.name, tabs)
@@ -315,8 +314,7 @@ class NativeTabTests(unittest.TestCase):
             "destination": ":1.7",
             "object_path": "/com/github/PintaProject/Pinta",
             "action": "active_document",
-            "index": 0,
-            "action_index": 1,
+            "index": 1,
             "count": 2,
         }
 
@@ -355,7 +353,6 @@ class NativeTabTests(unittest.TestCase):
             "object_path": "/com/github/PintaProject/Pinta",
             "action": "active_document",
             "index": 0,
-            "action_index": 1,
             "count": 2,
         }
 
@@ -369,10 +366,6 @@ class NativeTabTests(unittest.TestCase):
         with self.assertRaisesRegex(CommandError, "route is invalid"):
             bus.activate(route, 42)
         route["action"] = "active_document"
-        route["action_index"] = 0
-        with self.assertRaisesRegex(CommandError, "route is invalid"):
-            bus.activate(route, 42)
-        route["action_index"] = 1
         route["index"] = "not-an-index"
         with self.assertRaisesRegex(CommandError, "index is invalid"):
             bus.activate(route, 42)
