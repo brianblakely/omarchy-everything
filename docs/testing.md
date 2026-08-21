@@ -40,7 +40,9 @@ The suite performs:
   and scan cancellation propagation;
 - AT-SPI state restoration without screen-reader writes, browser-family
   matching, repeated bounded settling until exact browser coverage and after
-  transient coverage loss, emitted browser-tab rows, app-mode exclusion,
+  transient coverage loss, one bounded first-seen settle for supported
+  application windows without repeated delays for a legitimately empty
+  window, emitted browser-tab rows, app-mode exclusion,
   native default-action activation, deep GTK 4 tab lists with one transparent
   grouping wrapper, repeated toolkit accessibility IDs, rejection of generic
   component-only tabs, capability-tested Pinta/Nautilus action routes,
@@ -140,6 +142,8 @@ single refresh followed by a visible stale notification.
   tools. Confirm neither page-authored nor tool tabs appear.
 - Current Nautilus and Pinta with multiple native tabs, plus another GTK/Qt
   application with genuine native tabs and an editor/web app with DOM tabs.
+  Launch Nautilus and create its tabs before opening Everything; both rows must
+  appear in that initial panel generation without closing and reopening it.
   Confirm the deep, grouping-wrapped Nautilus/Pinta strips expand, only native
   application tabs become rows, duplicate toolkit accessibility IDs remain
   distinct, each row's metadata names its owning application rather than its

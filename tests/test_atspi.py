@@ -329,7 +329,7 @@ class NativeTabTests(unittest.IsolatedAsyncioTestCase):
         provider.settled_browser_clients = old_settled
 
         with patch("everything.providers.atspi.AtspiTree", UncoveredTree), patch(
-            "everything.providers.atspi.BROWSER_SETTLE_DELAYS", (60,)
+            "everything.providers.atspi.NATIVE_TAB_SETTLE_DELAYS", (60,)
         ), patch("everything.providers.atspi.process_birth", return_value="birth"):
             task = asyncio.create_task(provider.scan(context))
             await started.wait()
@@ -530,7 +530,7 @@ class NativeTabTests(unittest.IsolatedAsyncioTestCase):
         provider = AtspiProvider()
 
         with patch("everything.providers.atspi.AtspiTree", DelayedTree), patch(
-            "everything.providers.atspi.BROWSER_SETTLE_DELAYS", (0,)
+            "everything.providers.atspi.NATIVE_TAB_SETTLE_DELAYS", (0,)
         ), patch("everything.providers.atspi.process_birth", return_value="birth"):
             result = await provider.scan(context)
 
@@ -586,7 +586,7 @@ class NativeTabTests(unittest.IsolatedAsyncioTestCase):
         provider = AtspiProvider()
 
         with patch("everything.providers.atspi.AtspiTree", DelayedAcrossScansTree), patch(
-            "everything.providers.atspi.BROWSER_SETTLE_DELAYS", (0,)
+            "everything.providers.atspi.NATIVE_TAB_SETTLE_DELAYS", (0,)
         ), patch("everything.providers.atspi.process_birth", return_value="birth"):
             first = await provider.scan(context)
             self.assertEqual(first.items, [])
@@ -645,7 +645,7 @@ class NativeTabTests(unittest.IsolatedAsyncioTestCase):
         provider = AtspiProvider()
 
         with patch("everything.providers.atspi.AtspiTree", IntermittentTree), patch(
-            "everything.providers.atspi.BROWSER_SETTLE_DELAYS", (0,)
+            "everything.providers.atspi.NATIVE_TAB_SETTLE_DELAYS", (0,)
         ), patch("everything.providers.atspi.process_birth", return_value="birth"):
             first = await provider.scan(context)
             second = await provider.scan(context)
@@ -653,6 +653,108 @@ class NativeTabTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item.title for item in first.items], ["Current page"])
         self.assertEqual([item.title for item in second.items], ["Current page"])
         self.assertEqual(IntermittentTree.scans, 3)
+
+    async def test_provider_settles_first_seen_nautilus_tabs(self) -> None:
+        client = {
+            "address": "0xabc",
+            "pid": 42,
+            "class": "org.gnome.Nautilus",
+            "title": "Home",
+            "focusHistoryID": 0,
+        }
+        top = TopLevel(None, object(), 42, 0, client["title"], client)
+        tabs = [
+            NativeTab(
+                accessible=self.component_tab("Home", "tab-1", selected=True),
+                top=top,
+                strip_path=(0,),
+                tab_path=(0, index),
+                index=index,
+                title=title,
+                selected=index == 0,
+                native_id=f"tab-{index + 1}",
+            )
+            for index, title in enumerate(("Home", "Downloads"))
+        ]
+
+        class DelayedNautilusTree:
+            scans = 0
+
+            def top_levels(self, _context):
+                return [top]
+
+            def native_tabs(self, _top, *, browser):
+                self.__class__.scans += 1
+                return tabs if not browser and self.__class__.scans >= 2 else []
+
+        class NautilusRoutes:
+            def routes(self, *_args):
+                return [{"kind": "gtk-action"} for _tab in tabs]
+
+        context = ScanContext(
+            runner=CommandRunner(),
+            processes=ProcTable({}),
+            hypr_clients=[client],
+            provider_metadata={
+                "hyprland": {
+                    "clients": [{"address": "0xabc", "item_id": "hyprland:window"}]
+                }
+            },
+        )
+        provider = AtspiProvider()
+        provider.gtk_actions = NautilusRoutes()  # type: ignore[assignment]
+
+        with patch("everything.providers.atspi.AtspiTree", DelayedNautilusTree), patch(
+            "everything.providers.atspi.NATIVE_TAB_SETTLE_DELAYS", (0,)
+        ), patch("everything.providers.atspi.process_birth", return_value="birth"):
+            result = await provider.scan(context)
+
+        self.assertEqual(DelayedNautilusTree.scans, 2)
+        self.assertEqual([item.title for item in result.items], ["Home", "Downloads"])
+        self.assertEqual(
+            provider.settled_application_clients,
+            {("0xabc", 42, "birth")},
+        )
+
+    async def test_provider_does_not_repeatedly_settle_empty_nautilus_window(self) -> None:
+        client = {
+            "address": "0xabc",
+            "pid": 42,
+            "class": "org.gnome.Nautilus",
+            "title": "Home",
+        }
+        top = TopLevel(None, object(), 42, 0, client["title"], client)
+
+        class EmptyNautilusTree:
+            scans = 0
+
+            def top_levels(self, _context):
+                return [top]
+
+            def native_tabs(self, _top, *, browser):
+                self.__class__.scans += 1
+                return []
+
+        context = ScanContext(
+            runner=CommandRunner(),
+            processes=ProcTable({}),
+            hypr_clients=[client],
+        )
+        provider = AtspiProvider()
+
+        with patch("everything.providers.atspi.AtspiTree", EmptyNautilusTree), patch(
+            "everything.providers.atspi.NATIVE_TAB_SETTLE_DELAYS", (0,)
+        ), patch("everything.providers.atspi.process_birth", return_value="birth"):
+            first = await provider.scan(context)
+            second = await provider.scan(context)
+
+        self.assertEqual(first.items, [])
+        self.assertEqual(second.items, [])
+        self.assertEqual(EmptyNautilusTree.scans, 3)
+        self.assertEqual(
+            provider.settled_application_clients,
+            {("0xabc", 42, "birth")},
+        )
 
     async def test_provider_drops_application_tabs_without_their_mapped_parent(self) -> None:
         client = {

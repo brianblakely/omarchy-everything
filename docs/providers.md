@@ -53,6 +53,14 @@ becomes unsettled if a later first pass loses its strip. A cold or temporarily
 incomplete accessibility tree therefore cannot permanently suppress its tabs.
 Managed-window rows still publish immediately, and later browser rows merge
 into the same open panel.
+Current Pinta and Nautilus windows also receive a bounded pass when first seen.
+Their toolkit top level, native tab list, and exact GTK action route can become
+available at different times, so the initial panel generation is not allowed
+to treat the first empty accessibility frame as final. Unlike a browser, an
+application may legitimately expose no tab yet. Its window identity is
+therefore marked attempted after the first bounded pass; subsequent ordinary
+polls still discover newly added tabs without imposing the settle delay on
+every generation.
 The settle waits are cancellable asyncio delays. The tree reads before and
 after each wait run on the dedicated AT-SPI owner thread alongside every other
 libatspi call. The protocol loop remains independent, and no additional

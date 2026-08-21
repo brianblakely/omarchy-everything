@@ -45,9 +45,12 @@ REJECTED_STRIP_NAME = re.compile(
     r"(?:dock|tool|sidebar|side panel|developer tools|inspector)",
     re.IGNORECASE,
 )
-BROWSER_SETTLE_DELAYS = (0.1, 0.2, 0.4, 0.8)
+NATIVE_TAB_SETTLE_DELAYS = (0.1, 0.2, 0.4, 0.8)
 PREFERRED_TAB_ACTIONS = ("activate", "click", "press", "select", "dodefault")
 GTK_ACTION_INTERFACE = "org.gtk.Actions"
+GTK_ACTION_APPLICATION_CLASSES = frozenset(
+    {"com.github.pintaproject.pinta", "org.gnome.nautilus"}
+)
 DBUS_INTERFACE = "org.freedesktop.DBus"
 DBUS_DESTINATION = "org.freedesktop.DBus"
 DBUS_PATH = "/org/freedesktop/DBus"
@@ -707,6 +710,7 @@ class AtspiProvider:
     def __init__(self) -> None:
         self.objects: dict[str, NativeTab] = {}
         self.settled_browser_clients: set[tuple[str, int, str]] = set()
+        self.settled_application_clients: set[tuple[str, int, str]] = set()
         self.gtk_actions: GtkActionBus | None = None
 
     def _gtk_action_routes(
@@ -727,28 +731,45 @@ class AtspiProvider:
         # Discovery dispatches this entire coroutine to the single AT-SPI
         # executor. Its asyncio sleeps are cancellable there, while the helper's
         # protocol loop and unrelated providers remain independently runnable.
-        expected = self._browser_clients(context)
-        current_identities = set(expected)
-        settled = self.settled_browser_clients & current_identities
+        expected_browsers = self._browser_clients(context)
+        expected_applications = self._application_clients(context)
+        browser_identities = set(expected_browsers)
+        application_identities = set(expected_applications)
+        settled_browsers = self.settled_browser_clients & browser_identities
+        settled_applications = (
+            self.settled_application_clients & application_identities
+        )
 
         best = self._collect(context)
         await asyncio.sleep(0)
-        settled = {
+        settled_browsers = {
             identity
-            for identity in settled
-            if expected[identity] in best[2]
+            for identity in settled_browsers
+            if expected_browsers[identity] in best[2]
         }
-        new_identities = current_identities - settled
-        if new_identities:
-            expected_addresses = {expected[identity] for identity in new_identities}
+        unsettled_browsers = browser_identities - settled_browsers
+        first_seen_applications = application_identities - settled_applications
+        settle_targets = {
+            **{
+                identity: expected_browsers[identity]
+                for identity in unsettled_browsers
+            },
+            **{
+                identity: expected_applications[identity]
+                for identity in first_seen_applications
+            },
+        }
+        if settle_targets:
+            expected_addresses = set(settle_targets.values())
             best_coverage = len(best[2] & expected_addresses)
-            for delay in BROWSER_SETTLE_DELAYS:
+            for delay in NATIVE_TAB_SETTLE_DELAYS:
                 if best_coverage == len(expected_addresses):
                     break
-                # Chromium can publish its top-level frame before the native
-                # browser controls arrive on AT-SPI. Yield during the bounded
-                # settle pass so newer protocol scans can cancel this one and
-                # independent non-AT-SPI providers can keep making progress.
+                # Chromium and current GTK applications can publish their
+                # top-level frame before native tabs and exact action routes
+                # arrive on AT-SPI/D-Bus. Yield during the bounded settle pass
+                # so newer protocol scans can cancel this one and independent
+                # non-AT-SPI providers can keep making progress.
                 await asyncio.sleep(delay)
                 candidate = self._collect(context)
                 await asyncio.sleep(0)
@@ -759,14 +780,20 @@ class AtspiProvider:
                     best = candidate
                     best_coverage = coverage
             covered_addresses = best[2] & expected_addresses
-            settled.update(
+            settled_browsers.update(
                 identity
-                for identity in new_identities
-                if expected[identity] in covered_addresses
+                for identity in unsettled_browsers
+                if expected_browsers[identity] in covered_addresses
             )
+            # A browser always has a native tab, so an uncovered browser stays
+            # eligible on later polls. Pinta and Nautilus may legitimately
+            # expose no tab yet; settle each new window only once and let later
+            # ordinary polls discover tabs without delaying every generation.
+            settled_applications.update(first_seen_applications)
 
-        items, objects, _browser_addresses = best
-        self.settled_browser_clients = settled
+        items, objects, _covered_addresses = best
+        self.settled_browser_clients = settled_browsers
+        self.settled_application_clients = settled_applications
         self.objects = objects
         return ProviderResult(self.name, items)
 
@@ -787,13 +814,32 @@ class AtspiProvider:
             out[(address, pid, births[pid])] = address
         return out
 
+    @staticmethod
+    def _application_clients(context: ScanContext) -> dict[tuple[str, int, str], str]:
+        out: dict[tuple[str, int, str], str] = {}
+        births: dict[int, str] = {}
+        for client in context.hypr_clients:
+            app_class = str(
+                client.get("class") or client.get("initialClass") or ""
+            ).lower()
+            if app_class not in GTK_ACTION_APPLICATION_CLASSES:
+                continue
+            address = normalized_address(client.get("address"))
+            pid = int(client.get("pid") or 0)
+            if not address or pid <= 0:
+                continue
+            if pid not in births:
+                births[pid] = process_birth(pid)
+            out[(address, pid, births[pid])] = address
+        return out
+
     def _collect(
         self, context: ScanContext
     ) -> tuple[list[Thing], dict[str, NativeTab], set[str]]:
         tree = AtspiTree()
         objects: dict[str, NativeTab] = {}
         items: list[Thing] = []
-        browser_addresses: set[str] = set()
+        covered_addresses: set[str] = set()
         top_levels = tree.top_levels(context)
         candidates: list[tuple[TopLevel, str, bool, int, list[NativeTab], bool]] = []
         fallback_top_counts: dict[tuple[str, int], int] = {}
@@ -835,8 +881,7 @@ class AtspiProvider:
                 tab_routes = self._gtk_action_routes(app_class, pid, top.name, tabs)
                 if not tab_routes or len(tab_routes) != len(tabs):
                     continue
-            if is_browser:
-                browser_addresses.add(address)
+            covered_addresses.add(address)
             birth = process_birth(pid)
             active_window = int(top.client.get("focusHistoryID") or 0) == 0
             kind = "browser-tab" if is_browser else "app-tab"
@@ -865,7 +910,7 @@ class AtspiProvider:
                         },
                     )
                 )
-        return items, objects, browser_addresses
+        return items, objects, covered_addresses
 
     @staticmethod
     def _provider_name(app_class: str, browser: bool) -> str:
