@@ -39,28 +39,31 @@ and developer-tool strips. A tab must be either a direct child of its tab list
 or the sole child of one transparent `GROUPING` wrapper, matching current
 GTK 4/libadwaita tab bars without recursively accepting arbitrary controls.
 Within the globally bounded AT-SPI walk, absolute application-tree depth is not
-used as a native/tab distinction; document ancestry is. The provider then
+used as a native/tab distinction; document ancestry is. A document root is a
+hard traversal boundary, so web-page and spreadsheet descendants neither
+consume the native-control node budget nor delay the scan. The provider then
 chooses a browser's primary strip by real page-tab count with depth as a
 tie-breaker. This supports horizontal, vertical, and custom native tab-strip
 layouts without accepting page-authored ARIA tabs.
 
-When a managed browser is first seen, discovery gives its native controls a
-bounded settle pass: Chromium can publish the top-level frame before its tab
-strip has arrived on AT-SPI. Only exact browser addresses whose tab strips
-were actually observed become settled. An uncovered address remains eligible
-for the same bounded wait on a later poll, and a previously covered address
-becomes unsettled if a later first pass loses its strip. A cold or temporarily
-incomplete accessibility tree therefore cannot permanently suppress its tabs.
-Managed-window rows still publish immediately, and later browser rows merge
-into the same open panel.
-Current Pinta and Nautilus windows also receive a bounded pass when first seen.
-Their toolkit top level, native tab list, and exact GTK action route can become
-available at different times, so the initial panel generation is not allowed
-to treat the first empty accessibility frame as final. Unlike a browser, an
-application may legitimately expose no tab yet. Its window identity is
-therefore marked attempted after the first bounded pass; subsequent ordinary
-polls still discover newly added tabs without imposing the settle delay on
-every generation.
+When an initial priority pass finds no actionable tabs, discovery gives native
+controls a bounded settle pass: Chromium can publish the top-level frame before
+its tab strip has arrived on AT-SPI. The pass stops as soon as any exact target
+has actionable coverage. Only exact browser addresses whose tab strips were
+actually observed become settled. An uncovered address remains eligible on a
+later poll, and a previously covered address becomes unsettled if a later first
+pass loses its strip. If another priority client already has actionable rows,
+those rows publish immediately and empty clients rely on ordinary later polls
+instead of imposing a settle delay. A cold or temporarily incomplete
+accessibility tree therefore cannot permanently suppress its tabs or hold back
+another client's rows. Managed-window rows still publish independently first.
+Current Pinta and Nautilus windows participate in the bounded pass when the
+priority generation is otherwise empty. Their toolkit top level, native tab
+list, and exact GTK action route can become available at different times.
+Unlike a browser, an application may legitimately expose no tab yet. Its
+window identity is therefore marked attempted after a completed bounded pass;
+subsequent ordinary polls still discover newly added tabs without imposing the
+settle delay on every generation.
 The first AT-SPI generation, and the first generation after the exact
 browser/Pinta/Nautilus client set changes, traverses only those priority
 clients. Once that set has published, a later poll also traverses generic
@@ -118,9 +121,11 @@ two exact `org.gtk.Actions` adapters instead:
   single-window route activates the exact integer index.
 
 Both adapters revalidate process ownership, action name/signature, tab count,
-index, and the target's native identity immediately around activation. Other
-component-only tabs remain omitted while their exact outer-window row stays
-available.
+index, and the target's native identity immediately around activation. The
+native checks follow the strip path captured by discovery, reject document
+ancestors, and require the same strict tab-list structure without walking
+unrelated application branches. Other component-only tabs remain omitted
+while their exact outer-window row stays available.
 
 ## Kitty
 

@@ -39,15 +39,17 @@ The suite performs:
 - partial provider streaming, provider failure isolation, stale-row removal,
   and scan cancellation propagation;
 - AT-SPI state restoration without screen-reader writes, browser-family
-  matching, repeated bounded settling until exact browser coverage and after
-  transient coverage loss, one bounded first-seen settle for supported
-  application windows without repeated delays for a legitimately empty
-  window, priority-only publication before deferred generic traversal at
-  provider startup and after the priority client set changes, emitted
-  browser-tab rows, app-mode exclusion,
+  matching, bounded settling of otherwise-empty priority generations until
+  first exact coverage and after transient coverage loss, ordinary retry
+  eligibility without allowing an uncovered client to delay available rows,
+  one bounded first-seen settle for supported application windows without
+  repeated delays for a legitimately empty window, priority-only publication
+  before deferred generic traversal at provider startup and after the priority
+  client set changes, emitted browser-tab rows, app-mode exclusion,
   native default-action activation, deep GTK 4 tab lists with one transparent
-  grouping wrapper, repeated toolkit accessibility IDs, rejection of generic
-  component-only tabs, capability-tested Pinta/Nautilus action routes,
+  grouping wrapper, hard document-subtree pruning before descendant reads,
+  repeated toolkit accessibility IDs, rejection of generic component-only
+  tabs, capability-tested Pinta/Nautilus action routes,
   Pinta's direct AT-SPI/action indexes and activation method,
   owning-application class names on application-tab metadata,
   removal of application tabs whose mapped parent window has closed, including
@@ -55,9 +57,9 @@ The suite performs:
   shared dedicated-owner thread affinity for AT-SPI and Ghostty scans and
   activation, protocol-loop responsiveness during a blocking native traversal,
   and cancellation without publishing a partially settled provider generation,
-  D-Bus owner/action/signature/index validation, pre/post native-identity
-  checks, multi-window ambiguity, and exclusion of document-authored/tool tab
-  strips;
+  D-Bus owner/action/signature/index validation, targeted pre/post
+  native-identity checks without unrelated branch traversal, multi-window
+  ambiguity, and exclusion of document-authored/tool tab strips;
 - Hyprland mapped/hidden/group/scratchpad handling, mapped-only child-provider
   routing with unmapped matching evidence, and Herdr protocol-20 shape;
 - Ghostty effective-binding filtering, 9+ virtualized rows, duplicate

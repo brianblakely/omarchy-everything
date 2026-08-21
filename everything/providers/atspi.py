@@ -26,6 +26,20 @@ except (ImportError, ValueError):  # Covered as an isolated provider warning.
     GLib = None  # type: ignore[assignment]
 
 
+DOCUMENT_ROLES = (
+    frozenset(
+        {
+            Atspi.Role.DOCUMENT_EMAIL,
+            Atspi.Role.DOCUMENT_FRAME,
+            Atspi.Role.DOCUMENT_PRESENTATION,
+            Atspi.Role.DOCUMENT_SPREADSHEET,
+            Atspi.Role.DOCUMENT_TEXT,
+            Atspi.Role.DOCUMENT_WEB,
+        }
+    )
+    if Atspi is not None
+    else frozenset()
+)
 BROWSER_CLASS = re.compile(
     r"(?:^|[._-])(?:chromium|google-chrome|chrome|brave(?:-browser)?|microsoft-edge|"
     r"firefox|zen|vivaldi|helium|librewolf)(?=$|[._-])",
@@ -123,31 +137,27 @@ class Node:
     accessible: Any
     path: tuple[int, ...]
     depth: int
-    inside_document: bool
-    ancestors: tuple[Any, ...]
+    role_value: Any = None
 
 
 def walk(root: Any, *, max_nodes: int = 6000, max_depth: int = 24) -> Iterator[Node]:
     if Atspi is None:
         return
-    document_roles = {
-        Atspi.Role.DOCUMENT_EMAIL,
-        Atspi.Role.DOCUMENT_FRAME,
-        Atspi.Role.DOCUMENT_PRESENTATION,
-        Atspi.Role.DOCUMENT_SPREADSHEET,
-        Atspi.Role.DOCUMENT_TEXT,
-        Atspi.Role.DOCUMENT_WEB,
-    }
-    stack: list[Node] = [Node(root, (), 0, False, ())]
+    stack: list[Node] = [Node(root, (), 0)]
     visited = 0
     while stack and visited < max_nodes:
         node = stack.pop()
         visited += 1
+        node.role_value = role(node.accessible)
         yield node
         if node.depth >= max_depth or has_state(node.accessible, Atspi.StateType.DEFUNCT):
             continue
-        node_role = role(node.accessible)
-        inside_document = node.inside_document or node_role in document_roles
+        # Native controls cannot live inside document content. Do not merely
+        # mark those descendants as ineligible: crossing a large web page or
+        # spreadsheet can consume the entire walk budget and several seconds
+        # of synchronous AT-SPI calls before any native strip is published.
+        if node.role_value in DOCUMENT_ROLES:
+            continue
         descendants = children(node.accessible)
         for index in range(len(descendants) - 1, -1, -1):
             stack.append(
@@ -155,8 +165,6 @@ def walk(root: Any, *, max_nodes: int = 6000, max_depth: int = 24) -> Iterator[N
                     descendants[index],
                     node.path + (index,),
                     node.depth + 1,
-                    inside_document,
-                    node.ancestors + (node_role,),
                 )
             )
 
@@ -648,23 +656,89 @@ class AtspiTree:
                 tabs.append(((index, 0), wrapped[0]))
         return tabs
 
+    @classmethod
+    def _actionable_tab_children(
+        cls, tab_list: Any
+    ) -> list[tuple[tuple[int, ...], Any]]:
+        tabs = cls._tab_children(tab_list)
+        if not tabs:
+            return []
+        actionable = sum(
+            1
+            for _path, tab in tabs
+            if action_names(tab) or component_iface(tab) is not None
+        )
+        return tabs if actionable == len(tabs) else []
+
+    @staticmethod
+    def _native_tabs_from_strip(
+        top: TopLevel,
+        strip_path: tuple[int, ...],
+        tabs: list[tuple[tuple[int, ...], Any]],
+    ) -> list[NativeTab]:
+        result: list[NativeTab] = []
+        occurrences: dict[str, int] = {}
+        for ordinal, (relative_path, accessible) in enumerate(tabs):
+            title = clean_text(safe_call("", accessible.get_name)) or "Untitled tab"
+            key = folded(title)
+            occurrences[key] = occurrences.get(key, 0) + 1
+            occurrence = occurrences[key]
+            tab_path = strip_path + relative_path
+            native = accessible_id(accessible, ".".join(map(str, tab_path)))
+            result.append(
+                NativeTab(
+                    accessible=accessible,
+                    top=top,
+                    strip_path=strip_path,
+                    tab_path=tab_path,
+                    index=ordinal,
+                    title=title,
+                    selected=has_state(accessible, Atspi.StateType.SELECTED),
+                    native_id=native + f":{occurrence}",
+                )
+            )
+        return result
+
+    def native_tabs_at_path(
+        self, top: TopLevel, strip_path: tuple[int, ...]
+    ) -> list[NativeTab]:
+        """Revalidate one previously discovered strip without a broad walk."""
+
+        if Atspi is None:
+            return []
+        current = top.accessible
+        for index in strip_path:
+            if (
+                not isinstance(index, int)
+                or index < 0
+                or has_state(current, Atspi.StateType.DEFUNCT)
+                or role(current) in DOCUMENT_ROLES
+            ):
+                return []
+            current = safe_call(None, current.get_child_at_index, index)
+            if current is None:
+                return []
+        if (
+            has_state(current, Atspi.StateType.DEFUNCT)
+            or role(current) != Atspi.Role.PAGE_TAB_LIST
+        ):
+            return []
+        strip_name = clean_text(safe_call("", current.get_name))
+        if REJECTED_STRIP_NAME.search(strip_name):
+            return []
+        tabs = self._actionable_tab_children(current)
+        return self._native_tabs_from_strip(top, strip_path, tabs) if tabs else []
+
     def native_tabs(self, top: TopLevel, *, browser: bool) -> list[NativeTab]:
         candidates: list[tuple[Node, list[tuple[tuple[int, ...], Any]]]] = []
         for node in walk(top.accessible):
-            if node.inside_document or role(node.accessible) != Atspi.Role.PAGE_TAB_LIST:
+            if node.role_value != Atspi.Role.PAGE_TAB_LIST:
                 continue
             strip_name = clean_text(safe_call("", node.accessible.get_name))
             if REJECTED_STRIP_NAME.search(strip_name):
                 continue
-            tabs = self._tab_children(node.accessible)
+            tabs = self._actionable_tab_children(node.accessible)
             if not tabs:
-                continue
-            actionable = sum(
-                1
-                for _path, tab in tabs
-                if action_names(tab) or component_iface(tab) is not None
-            )
-            if actionable != len(tabs):
                 continue
             candidates.append((node, tabs))
         if not candidates:
@@ -680,28 +754,7 @@ class AtspiTree:
             )
         )
         node, tabs = candidates[0]
-        result: list[NativeTab] = []
-        occurrences: dict[str, int] = {}
-        for ordinal, (relative_path, accessible) in enumerate(tabs):
-            title = clean_text(safe_call("", accessible.get_name)) or "Untitled tab"
-            key = folded(title)
-            occurrences[key] = occurrences.get(key, 0) + 1
-            occurrence = occurrences[key]
-            tab_path = node.path + relative_path
-            native = accessible_id(accessible, ".".join(map(str, tab_path)))
-            result.append(
-                NativeTab(
-                    accessible=accessible,
-                    top=top,
-                    strip_path=node.path,
-                    tab_path=tab_path,
-                    index=ordinal,
-                    title=title,
-                    selected=has_state(accessible, Atspi.StateType.SELECTED),
-                    native_id=native + f":{occurrence}",
-                )
-            )
-        return result
+        return self._native_tabs_from_strip(top, node.path, tabs)
 
 
 class AtspiProvider:
@@ -761,11 +814,16 @@ class AtspiProvider:
                 for identity in first_seen_applications
             },
         }
-        if settle_targets:
+        settle_attempted = False
+        # Settle only while no actionable priority row is ready. Never hold an
+        # available row back for another empty client; that client still gets
+        # an ordinary first pass on every later poll.
+        if settle_targets and not best[2]:
+            settle_attempted = True
             expected_addresses = set(settle_targets.values())
             best_coverage = len(best[2] & expected_addresses)
             for delay in NATIVE_TAB_SETTLE_DELAYS:
-                if best_coverage == len(expected_addresses):
+                if best_coverage:
                     break
                 # Chromium and current GTK applications can publish their
                 # top-level frame before native tabs and exact action routes
@@ -781,12 +839,19 @@ class AtspiProvider:
                 ):
                     best = candidate
                     best_coverage = coverage
-            covered_addresses = best[2] & expected_addresses
-            settled_browsers.update(
-                identity
-                for identity in unsettled_browsers
-                if expected_browsers[identity] in covered_addresses
-            )
+
+        covered_addresses = best[2]
+        settled_browsers.update(
+            identity
+            for identity in unsettled_browsers
+            if expected_browsers[identity] in covered_addresses
+        )
+        settled_applications.update(
+            identity
+            for identity in first_seen_applications
+            if expected_applications[identity] in covered_addresses
+        )
+        if settle_attempted:
             # A browser always has a native tab, so an uncovered browser stays
             # eligible on later polls. Pinta and Nautilus may legitimately
             # expose no tab yet; settle each new window only once and let later
@@ -981,7 +1046,9 @@ class AtspiProvider:
             or isinstance(count, bool)
         ):
             raise CommandError("native application tab index is invalid")
-        current_tabs = AtspiTree.__new__(AtspiTree).native_tabs(tab.top, browser=False)
+        current_tabs = AtspiTree.__new__(AtspiTree).native_tabs_at_path(
+            tab.top, tab.strip_path
+        )
         if (
             count <= 0
             or index < 0

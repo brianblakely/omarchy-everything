@@ -167,16 +167,24 @@ each change to the exact browser/Pinta/Nautilus client set first publishes a
 priority-only generation. Generic toolkit trees are traversed on a later poll
 and merged only after that priority set has published, so a slow unrelated
 application cannot hold back actionable tabs from those current adapters. An
-exact browser client
-remains eligible for bounded retries on later polls until its own actionable
+exact browser client remains eligible on later polls until its own actionable
 native tab strip is observed; merely exhausting one settle pass does not make
-an empty accessibility frame authoritative. A later scan that loses previously
-observed coverage makes that client retryable again. First-seen Pinta and
-Nautilus windows join the same bounded pass so a lazily published toolkit tree
-or action route is present in the initial panel generation. An empty supported
-application is marked attempted after that pass because it may legitimately
-have no tab yet; ordinary later polls can still discover tabs without delaying
-every generation.
+an empty accessibility frame authoritative. Bounded settling runs only while
+the priority generation has no actionable coverage and stops on its first
+exact coverage, so one empty client cannot delay rows that are already ready.
+A later scan that loses previously observed coverage makes that client
+retryable again. First-seen Pinta and Nautilus windows join the same bounded
+pass when the generation is otherwise empty. An empty supported application
+is marked attempted after that pass because it may legitimately have no tab
+yet; ordinary later polls can still discover tabs without delaying every
+generation.
+
+Native discovery stops at every `DOCUMENT_*` root instead of spending the
+global node budget inside content that cannot own native controls. Pinta and
+Nautilus activation revalidates the previously discovered strip path before
+and after its GTK action; the path must still avoid document roots and resolve
+to the same strict tab-list structure, count, index, and native ID. Unrelated
+application branches are not rediscovered during activation.
 
 ## Identity and activation
 

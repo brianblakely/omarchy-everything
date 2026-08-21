@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 from everything.atspi_runtime import AtspiExecutor
 from everything.commands import CommandError, CommandRunner
+from everything.model import Thing
 from everything.processes import ProcTable
 from everything.providers.atspi import (
     Atspi,
@@ -64,6 +65,7 @@ class FakeAccessible:
         self.action = FakeAction() if actionable else None
         self.component = component
         self.accessible_id = accessible_id
+        self.child_count_reads = 0
 
     def get_role(self):
         return self.role_value
@@ -75,6 +77,7 @@ class FakeAccessible:
         return ""
 
     def get_child_count(self) -> int:
+        self.child_count_reads += 1
         return len(self.children)
 
     def get_child_at_index(self, index: int):
@@ -142,6 +145,8 @@ class NativeTabTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([tab.title for tab in tabs], ["First", "Second"])
         self.assertTrue(tabs[0].selected)
+        self.assertEqual(document.child_count_reads, 0)
+        self.assertEqual(tree.native_tabs_at_path(top, (0, 0)), [])
 
     def test_deep_group_wrapped_native_application_tabs_are_accepted(self) -> None:
         first = self.tab("Home", "native-1", selected=True)
@@ -544,6 +549,46 @@ class NativeTabTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.items[0].parent_id, "hyprland:window")
         self.assertEqual(result.items[0].activation["address"], "0xabc")
         self.assertEqual(result.items[0].activation["tab_route"], {"kind": "atspi-action"})
+
+    async def test_available_tabs_are_not_delayed_by_an_uncovered_browser(self) -> None:
+        clients = [
+            {
+                "address": "0xnautilus",
+                "pid": 42,
+                "class": "org.gnome.Nautilus",
+                "title": "Home",
+            },
+            {
+                "address": "0xbrowser",
+                "pid": 43,
+                "class": "chromium",
+                "title": "Loading - Chromium",
+            },
+        ]
+        context = ScanContext(
+            runner=CommandRunner(),
+            processes=ProcTable({}),
+            hypr_clients=clients,
+        )
+        item = Thing("atspi:nautilus", "app-tab", "Nautilus", "Home")
+        provider = AtspiProvider()
+
+        with patch.object(
+            provider,
+            "_collect",
+            return_value=([item], {}, {"0xnautilus"}),
+        ) as collect, patch(
+            "everything.providers.atspi.NATIVE_TAB_SETTLE_DELAYS", (0,)
+        ), patch("everything.providers.atspi.process_birth", return_value="birth"):
+            result = await provider.scan(context)
+
+        self.assertEqual(result.items, [item])
+        self.assertEqual(collect.call_count, 1)
+        self.assertEqual(provider.settled_browser_clients, set())
+        self.assertEqual(
+            provider.settled_application_clients,
+            {("0xnautilus", 42, "birth")},
+        )
 
     async def test_provider_keeps_uncovered_browser_eligible_for_later_settling(self) -> None:
         client = {
@@ -1190,6 +1235,32 @@ class NativeTabTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaisesRegex(CommandError, "scan identity"):
             AtspiProvider._validated_gtk_tab(target, target.native_id, route)
+
+    def test_provider_revalidates_only_the_known_application_tab_strip(self) -> None:
+        unrelated = FakeAccessible(
+            Atspi.Role.PANEL,
+            "Unrelated content",
+            FakeAccessible(Atspi.Role.BUTTON, "Unrelated button", actionable=True),
+        )
+        native = FakeAccessible(
+            Atspi.Role.PAGE_TAB_LIST,
+            "Tab strip",
+            self.component_tab("First", "tab-1", selected=True),
+            self.component_tab("Second", "tab-2"),
+        )
+        root = FakeAccessible(Atspi.Role.FRAME, "First", unrelated, native)
+        top = TopLevel(None, root, 42, 0, "First", {"address": "0xabc"})
+        target = AtspiTree.__new__(AtspiTree).native_tabs(top, browser=False)[1]
+        unrelated.child_count_reads = 0
+
+        current = AtspiProvider._validated_gtk_tab(
+            target,
+            target.native_id,
+            {"index": 1, "count": 2},
+        )
+
+        self.assertEqual(current.native_id, target.native_id)
+        self.assertEqual(unrelated.child_count_reads, 0)
 
     async def test_provider_omits_app_mode_tabs_without_reclassifying_them(self) -> None:
         normal_client = {
