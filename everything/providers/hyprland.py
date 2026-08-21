@@ -90,12 +90,21 @@ class HyprlandProvider:
         if not isinstance(clients, list):
             raise CommandError("hyprctl client response was not a list")
 
-        context.hypr_clients = [client for client in clients if isinstance(client, dict)]
+        # Child providers route only through mapped clients. Preserve every
+        # current record separately as matching-only evidence so a lingering
+        # AT-SPI top can still bind to its unmapped, non-routable former parent
+        # instead of being reassigned to another live same-PID window.
+        context.hypr_matching_clients = [
+            client for client in clients if isinstance(client, dict)
+        ]
+        context.hypr_clients = [
+            client
+            for client in context.hypr_matching_clients
+            if client.get("mapped") is not False
+        ]
         items: list[Thing] = []
         metadata_clients: list[dict[str, Any]] = []
         for client in context.hypr_clients:
-            if client.get("mapped") is False:
-                continue
             address = normalized_address(client.get("address"))
             if not ADDRESS.fullmatch(address):
                 continue

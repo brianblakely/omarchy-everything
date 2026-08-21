@@ -21,12 +21,20 @@ class ScanContext:
     runner: CommandRunner
     processes: ProcTable
     hypr_clients: list[dict[str, Any]] = field(default_factory=list)
+    hypr_matching_clients: list[dict[str, Any]] = field(default_factory=list)
     provider_metadata: dict[str, dict[str, Any]] = field(default_factory=dict)
     providers: dict[str, Any] = field(default_factory=dict)
     include_ghostty: bool = False
 
     def clients_for_pid(self, pid: int) -> list[dict[str, Any]]:
         return [client for client in self.hypr_clients if int(client.get("pid") or 0) == int(pid)]
+
+    def matching_clients_for_pid(self, pid: int) -> list[dict[str, Any]]:
+        # Unit/provider callers that do not run Hyprland first retain the
+        # historical mapped-client input. A real discovery generation always
+        # supplies the full matching-evidence list explicitly.
+        clients = self.hypr_matching_clients or self.hypr_clients
+        return [client for client in clients if int(client.get("pid") or 0) == int(pid)]
 
     def client_by_address(self, address: str) -> dict[str, Any] | None:
         wanted = normalized_address(address)

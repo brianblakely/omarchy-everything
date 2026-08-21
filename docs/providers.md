@@ -7,6 +7,14 @@ managed client. Workspace, group, scratchpad, and hidden state only add
 context; they never exclude a client. Activation rechecks PID and Linux process
 birth before focusing the exact address through current `hl.dsp.focus`.
 Layer surfaces are outside the clients API and are not results.
+The mapped-only client set is the routing input for child providers; unmapped
+clients retained briefly by Hyprland cannot host tabs, panes, or buffers. A
+separate matching-only set retains those records for AT-SPI top-level
+disambiguation. Top-level titles must match even when only one same-PID client
+is present, a top matched to an unmapped record is rejected, and multiple tops
+claiming one address all fail closed. This prevents a closed window's lingering
+accessibility tree from being rebound to another live window in the same
+process.
 
 Window presentation also retains the client's ordered icon hint, class,
 initial class, and initial title. QML resolves those Hyprland-reported values
@@ -45,6 +53,10 @@ becomes unsettled if a later first pass loses its strip. A cold or temporarily
 incomplete accessibility tree therefore cannot permanently suppress its tabs.
 Managed-window rows still publish immediately, and later browser rows merge
 into the same open panel.
+The settle waits are cancellable asyncio delays. The tree reads before and
+after each wait run on the dedicated AT-SPI owner thread alongside every other
+libatspi call. The protocol loop remains independent, and no additional
+accessibility worker or listener thread shares the native connection.
 
 Recognized current Omarchy browser classes cover Chromium, Chrome, Brave
 variants, Edge, Firefox, Zen, Vivaldi, Helium, and LibreWolf. Normal private
@@ -55,6 +67,9 @@ their single browser tab is not distinct from the managed window. Generic
 GTK/Qt applications must expose both the bounded native structure above and a
 preferred AT-SPI tab action. A component interface alone is not an activation
 guarantee and does not make a generic application tab a thing.
+Every browser/application tab must also resolve to an exact mapped window from
+the current Hyprland scan. If that parent closes while its accessibility tree
+lingers, the next provider refresh publishes no child tab rows.
 DOM/editor tabs with no reliable external adapter remain represented by their
 outer window. An application-tab row uses the final component of its managed
 application class as its provider and displayed metadata. This preserves the

@@ -37,7 +37,7 @@ class FakeRunner:
 
 
 class HyprlandTests(unittest.IsolatedAsyncioTestCase):
-    async def test_only_mapped_clients_become_items(self) -> None:
+    async def test_only_mapped_clients_become_items_and_shared_routes(self) -> None:
         clients = [
             {
                 "address": "0xabc",
@@ -63,6 +63,8 @@ class HyprlandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Scratchpad", result.items[0].badges)
         self.assertEqual(result.items[0].icon_hints, ["foot-symbolic", "foot", "foot_/"])
         self.assertNotIn("process", result.items[0].kind)
+        self.assertEqual(context.hypr_clients, [clients[0]])
+        self.assertEqual(context.hypr_matching_clients, clients)
 
 
 class HerdrTests(unittest.TestCase):

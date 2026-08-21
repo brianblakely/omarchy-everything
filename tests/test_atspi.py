@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from everything.atspi_runtime import AtspiExecutor
 from everything.commands import CommandError, CommandRunner
 from everything.processes import ProcTable
 from everything.providers.atspi import (
@@ -92,7 +94,7 @@ class FakeAccessible:
 
 
 @unittest.skipIf(Atspi is None, "PyGObject AT-SPI is unavailable")
-class NativeTabTests(unittest.TestCase):
+class NativeTabTests(unittest.IsolatedAsyncioTestCase):
     @staticmethod
     def tab(name: str, identifier: str, selected: bool = False) -> FakeAccessible:
         return FakeAccessible(
@@ -223,6 +225,120 @@ class NativeTabTests(unittest.TestCase):
 
         self.assertTrue(all(is_browser_app_mode(client) for client in app_mode_clients))
         self.assertFalse(any(is_browser_app_mode(client) for client in normal_clients))
+
+    async def test_provider_scan_runs_on_the_dedicated_atspi_owner_thread(self) -> None:
+        protocol_thread = threading.get_ident()
+        observed: list[int] = []
+
+        class RecordingTree:
+            def __init__(self):
+                observed.append(threading.get_ident())
+
+            def top_levels(self, _context):
+                observed.append(threading.get_ident())
+                return []
+
+        context = ScanContext(CommandRunner(), ProcTable({}))
+        executor = AtspiExecutor()
+        try:
+            with patch("everything.providers.atspi.AtspiTree", RecordingTree):
+                result = await executor.run(lambda: AtspiProvider().scan(context))
+        finally:
+            await executor.close()
+
+        self.assertEqual(result.items, [])
+        self.assertNotEqual(executor.thread_id, protocol_thread)
+        self.assertEqual(observed, [executor.thread_id, executor.thread_id])
+
+    def test_unmapped_same_pid_client_is_matching_only_evidence(self) -> None:
+        live = {
+            "address": "0xlive",
+            "pid": 42,
+            "class": "org.example.Editor",
+            "title": "Live document",
+            "mapped": True,
+        }
+        closed = {
+            "address": "0xclosed",
+            "pid": 42,
+            "class": "org.example.Editor",
+            "title": "Closed document",
+            "mapped": False,
+        }
+        live_top = FakeAccessible(Atspi.Role.FRAME, "Live document")
+        closed_top = FakeAccessible(Atspi.Role.FRAME, "Closed document")
+
+        class Application(FakeAccessible):
+            def get_process_id(self):
+                return 42
+
+        application = Application(
+            Atspi.Role.APPLICATION,
+            "Editor",
+            closed_top,
+            live_top,
+        )
+        tree = AtspiTree.__new__(AtspiTree)
+        tree.applications = lambda: [application]  # type: ignore[method-assign]
+        context = ScanContext(
+            CommandRunner(),
+            ProcTable({}),
+            hypr_clients=[live],
+            hypr_matching_clients=[live, closed],
+        )
+
+        tops = tree.top_levels(context)
+
+        self.assertEqual([top.name for top in tops], ["Live document"])
+        self.assertEqual(tops[0].client["address"], "0xlive")
+        self.assertIsNone(AtspiTree._match_client("Unrelated", [live]))
+
+        duplicate_application = Application(
+            Atspi.Role.APPLICATION,
+            "Editor",
+            FakeAccessible(Atspi.Role.FRAME, "Live document"),
+            FakeAccessible(Atspi.Role.FRAME, "Live document"),
+        )
+        tree.applications = lambda: [duplicate_application]  # type: ignore[method-assign]
+        context.hypr_matching_clients = [live]
+        self.assertEqual(tree.top_levels(context), [])
+
+    async def test_cancelled_settle_scan_does_not_publish_partial_state(self) -> None:
+        client = {
+            "address": "0xabc",
+            "pid": 42,
+            "class": "chromium",
+            "title": "Loading - Chromium",
+        }
+        started = asyncio.Event()
+
+        class UncoveredTree:
+            def top_levels(self, _context):
+                started.set()
+                return []
+
+        context = ScanContext(
+            CommandRunner(),
+            ProcTable({}),
+            hypr_clients=[client],
+        )
+        provider = AtspiProvider()
+        old_objects = {"old": object()}
+        old_settled = {("0xold", 7, "old-birth")}
+        provider.objects = old_objects  # type: ignore[assignment]
+        provider.settled_browser_clients = old_settled
+
+        with patch("everything.providers.atspi.AtspiTree", UncoveredTree), patch(
+            "everything.providers.atspi.BROWSER_SETTLE_DELAYS", (60,)
+        ), patch("everything.providers.atspi.process_birth", return_value="birth"):
+            task = asyncio.create_task(provider.scan(context))
+            await started.wait()
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+        self.assertIs(provider.objects, old_objects)
+        self.assertIs(provider.settled_browser_clients, old_settled)
 
     def test_chromium_default_action_activates_a_tab(self) -> None:
         tab = FakeAccessible(
@@ -370,7 +486,7 @@ class NativeTabTests(unittest.TestCase):
         with self.assertRaisesRegex(CommandError, "index is invalid"):
             bus.activate(route, 42)
 
-    def test_provider_retries_first_seen_browser_until_tabs_are_available(self) -> None:
+    async def test_provider_retries_first_seen_browser_until_tabs_are_available(self) -> None:
         client = {
             "address": "0xabc",
             "pid": 42,
@@ -416,7 +532,7 @@ class NativeTabTests(unittest.TestCase):
         with patch("everything.providers.atspi.AtspiTree", DelayedTree), patch(
             "everything.providers.atspi.BROWSER_SETTLE_DELAYS", (0,)
         ), patch("everything.providers.atspi.process_birth", return_value="birth"):
-            result = provider._scan_sync(context)
+            result = await provider.scan(context)
 
         self.assertEqual(DelayedTree.scans, 2)
         self.assertEqual(len(result.items), 1)
@@ -426,7 +542,7 @@ class NativeTabTests(unittest.TestCase):
         self.assertEqual(result.items[0].activation["address"], "0xabc")
         self.assertEqual(result.items[0].activation["tab_route"], {"kind": "atspi-action"})
 
-    def test_provider_keeps_uncovered_browser_eligible_for_later_settling(self) -> None:
+    async def test_provider_keeps_uncovered_browser_eligible_for_later_settling(self) -> None:
         client = {
             "address": "0xabc",
             "pid": 42,
@@ -461,17 +577,22 @@ class NativeTabTests(unittest.TestCase):
             runner=CommandRunner(),
             processes=ProcTable({}),
             hypr_clients=[client],
+            provider_metadata={
+                "hyprland": {
+                    "clients": [{"address": "0xabc", "item_id": "hyprland:window"}]
+                }
+            },
         )
         provider = AtspiProvider()
 
         with patch("everything.providers.atspi.AtspiTree", DelayedAcrossScansTree), patch(
             "everything.providers.atspi.BROWSER_SETTLE_DELAYS", (0,)
         ), patch("everything.providers.atspi.process_birth", return_value="birth"):
-            first = provider._scan_sync(context)
+            first = await provider.scan(context)
             self.assertEqual(first.items, [])
             self.assertEqual(provider.settled_browser_clients, set())
 
-            second = provider._scan_sync(context)
+            second = await provider.scan(context)
 
         self.assertEqual(DelayedAcrossScansTree.scans, 4)
         self.assertEqual([item.title for item in second.items], ["Current page"])
@@ -480,7 +601,7 @@ class NativeTabTests(unittest.TestCase):
             {("0xabc", 42, "birth")},
         )
 
-    def test_provider_retries_when_a_settled_browser_temporarily_loses_coverage(self) -> None:
+    async def test_provider_retries_when_a_settled_browser_temporarily_loses_coverage(self) -> None:
         client = {
             "address": "0xabc",
             "pid": 42,
@@ -515,20 +636,70 @@ class NativeTabTests(unittest.TestCase):
             runner=CommandRunner(),
             processes=ProcTable({}),
             hypr_clients=[client],
+            provider_metadata={
+                "hyprland": {
+                    "clients": [{"address": "0xabc", "item_id": "hyprland:window"}]
+                }
+            },
         )
         provider = AtspiProvider()
 
         with patch("everything.providers.atspi.AtspiTree", IntermittentTree), patch(
             "everything.providers.atspi.BROWSER_SETTLE_DELAYS", (0,)
         ), patch("everything.providers.atspi.process_birth", return_value="birth"):
-            first = provider._scan_sync(context)
-            second = provider._scan_sync(context)
+            first = await provider.scan(context)
+            second = await provider.scan(context)
 
         self.assertEqual([item.title for item in first.items], ["Current page"])
         self.assertEqual([item.title for item in second.items], ["Current page"])
         self.assertEqual(IntermittentTree.scans, 3)
 
-    def test_provider_emits_distinct_deep_wrapped_application_tabs(self) -> None:
+    async def test_provider_drops_application_tabs_without_their_mapped_parent(self) -> None:
+        client = {
+            "address": "0xabc",
+            "pid": 42,
+            "class": "org.example.Editor",
+            "title": "Draft",
+            "focusHistoryID": 0,
+        }
+        top = TopLevel(None, object(), 42, 0, "Draft", client)
+        tab = NativeTab(
+            accessible=self.tab("Draft", "native-tab-1", selected=True),
+            top=top,
+            strip_path=(0,),
+            tab_path=(0, 0),
+            index=0,
+            title="Draft",
+            selected=True,
+            native_id="native-tab-1",
+        )
+
+        class LingeringTree:
+            def top_levels(self, _context):
+                return [top]
+
+            def native_tabs(self, _top, *, browser):
+                return [] if browser else [tab]
+
+        context = ScanContext(
+            runner=CommandRunner(),
+            processes=ProcTable({}),
+            # Model the toolkit tree/client lingering after Hyprland has
+            # removed the mapped parent from its public metadata.
+            hypr_clients=[client],
+            provider_metadata={"hyprland": {"clients": []}},
+        )
+        provider = AtspiProvider()
+
+        with patch("everything.providers.atspi.AtspiTree", LingeringTree), patch(
+            "everything.providers.atspi.process_birth", return_value="birth"
+        ):
+            result = await provider.scan(context)
+
+        self.assertEqual(result.items, [])
+        self.assertEqual(provider.objects, {})
+
+    async def test_provider_emits_distinct_deep_wrapped_application_tabs(self) -> None:
         client = {
             "address": "0xabc",
             "pid": 42,
@@ -586,7 +757,7 @@ class NativeTabTests(unittest.TestCase):
         with patch("everything.providers.atspi.AtspiTree", return_value=tree), patch(
             "everything.providers.atspi.process_birth", return_value="birth"
         ):
-            result = provider._scan_sync(context)
+            result = await provider.scan(context)
 
         self.assertEqual([item.kind for item in result.items], ["app-tab", "app-tab"])
         self.assertEqual([item.title for item in result.items], ["Home", "Downloads"])
@@ -611,7 +782,7 @@ class NativeTabTests(unittest.TestCase):
             ("org.gnome.Nautilus", 42, "Home"),
         )
 
-    def test_provider_omits_component_only_tabs_without_a_native_route(self) -> None:
+    async def test_provider_omits_component_only_tabs_without_a_native_route(self) -> None:
         client = {
             "address": "0xabc",
             "pid": 42,
@@ -633,21 +804,33 @@ class NativeTabTests(unittest.TestCase):
             runner=CommandRunner(),
             processes=ProcTable({}),
             hypr_clients=[client],
+            provider_metadata={
+                "hyprland": {
+                    "clients": [{"address": "0xabc", "item_id": "hyprland:window"}]
+                }
+            },
         )
         provider = AtspiProvider()
 
         class NoRoutes:
+            def __init__(self):
+                self.calls = []
+
             def routes(self, *_args):
+                self.calls.append(_args)
                 return None
 
-        provider.gtk_actions = NoRoutes()  # type: ignore[assignment]
+        routes = NoRoutes()
+        provider.gtk_actions = routes  # type: ignore[assignment]
         with patch("everything.providers.atspi.AtspiTree", return_value=tree):
-            result = provider._scan_sync(context)
+            result = await provider.scan(context)
 
         self.assertEqual(result.items, [])
         self.assertEqual(provider.objects, {})
+        self.assertEqual(len(routes.calls), 1)
+        self.assertEqual(routes.calls[0][:3], ("org.example.Editor", 42, "First"))
 
-    def test_provider_omits_ambiguous_component_routes_for_two_app_windows(self) -> None:
+    async def test_provider_omits_ambiguous_component_routes_for_two_app_windows(self) -> None:
         clients = [
             {
                 "address": f"0xabc{index}",
@@ -695,14 +878,25 @@ class NativeTabTests(unittest.TestCase):
             runner=CommandRunner(),
             processes=ProcTable({}),
             hypr_clients=clients,
+            provider_metadata={
+                "hyprland": {
+                    "clients": [
+                        {
+                            "address": client["address"],
+                            "item_id": f"hyprland:{client['address']}",
+                        }
+                        for client in clients
+                    ]
+                }
+            },
         )
 
         with patch("everything.providers.atspi.AtspiTree", MultipleTree):
-            result = provider._scan_sync(context)
+            result = await provider.scan(context)
 
         self.assertEqual(result.items, [])
 
-    def test_provider_activates_and_revalidates_native_application_tab(self) -> None:
+    async def test_provider_activates_and_revalidates_native_application_tab(self) -> None:
         client = {
             "address": "0xabc",
             "pid": 42,
@@ -720,14 +914,15 @@ class NativeTabTests(unittest.TestCase):
         top = TopLevel(None, root, 42, 0, "Home", client)
         tabs = AtspiTree.__new__(AtspiTree).native_tabs(top, browser=False)
         target = tabs[1]
+        protocol_thread = threading.get_ident()
         events = []
 
         class FakeGtkActions:
             def activate(self, route, pid):
-                events.append(("activate", route["index"], pid))
+                events.append(("activate", route["index"], pid, threading.get_ident()))
 
         async def record_focus(_context, address):
-            events.append(("focus", address))
+            events.append(("focus", address, threading.get_ident()))
 
         provider = AtspiProvider()
         provider.objects = {"item": target}
@@ -754,13 +949,24 @@ class NativeTabTests(unittest.TestCase):
             },
         }
 
-        with patch("everything.providers.atspi.process_birth", return_value="birth"), patch(
-            "everything.providers.atspi.focus_address",
-            new=AsyncMock(side_effect=record_focus),
-        ):
-            asyncio.run(provider.activate(activation, context))
+        executor = AtspiExecutor()
+        try:
+            with patch("everything.providers.atspi.process_birth", return_value="birth"), patch(
+                "everything.providers.atspi.focus_address",
+                new=AsyncMock(side_effect=record_focus),
+            ):
+                await executor.run(lambda: provider.activate(activation, context))
+        finally:
+            await executor.close()
 
-        self.assertEqual(events, [("activate", 1, 42), ("focus", "0xabc")])
+        self.assertNotEqual(executor.thread_id, protocol_thread)
+        self.assertEqual(
+            events,
+            [
+                ("activate", 1, 42, executor.thread_id),
+                ("focus", "0xabc", executor.thread_id),
+            ],
+        )
 
     def test_provider_rejects_reordered_native_application_tab(self) -> None:
         first = self.component_tab("First", "tab-1", selected=True)
@@ -776,7 +982,7 @@ class NativeTabTests(unittest.TestCase):
         with self.assertRaisesRegex(CommandError, "scan identity"):
             AtspiProvider._validated_gtk_tab(target, target.native_id, route)
 
-    def test_provider_omits_app_mode_tabs_without_reclassifying_them(self) -> None:
+    async def test_provider_omits_app_mode_tabs_without_reclassifying_them(self) -> None:
         normal_client = {
             "address": "0xnormal",
             "pid": 42,
@@ -836,7 +1042,7 @@ class NativeTabTests(unittest.TestCase):
         with patch("everything.providers.atspi.AtspiTree", MixedTree), patch(
             "everything.providers.atspi.process_birth", return_value="birth"
         ):
-            result = provider._scan_sync(context)
+            result = await provider.scan(context)
 
         self.assertEqual([item.title for item in result.items], ["Normal tab"])
         self.assertEqual(result.items[0].kind, "browser-tab")

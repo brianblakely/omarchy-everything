@@ -196,7 +196,6 @@ Item {
 
     if (message.type === "snapshot") {
       var correlated = String(message.requestId || "") === activeScanId
-        || String(message.requestId || "") === "event"
       if (!correlated) return
       if (message.full === true) {
         publishItems(message.items)

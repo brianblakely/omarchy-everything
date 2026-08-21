@@ -126,7 +126,8 @@ by its provider. The complete path remains provider context for native routing.
 ## Helper and provider ownership
 
 `everything/server.py` owns stdin/stdout framing, cancellation, signal
-handling, AT-SPI guard lifetime, and concurrent activation tasks.
+handling, AT-SPI guard and owner-thread lifetime, and concurrent activation
+tasks.
 `everything/discovery.py` owns provider scheduling, partial/full publication,
 failure isolation, one stale refresh/retry, and the shared metadata used for
 container routing.
@@ -136,6 +137,24 @@ concurrently. Neovim receives a cheap second scan after container metadata is
 available so it can route through an exact host without guessing. Ghostty's
 modal bridge runs only during a panel-opening scan or activation revalidation,
 never on the normal poll. The panel exposes no manual scan control.
+The shared routing client set contains only mapped Hyprland clients. A separate
+matching-only view retains current unmapped records so a lingering toolkit top
+level binds to its closed, non-routable former parent instead of being assigned
+to another live same-PID window. Even a sole candidate must match the top-level
+title, and multiple top levels claiming one address all fail closed. An AT-SPI
+tab is published only when the matched address also has an exact mapped parent
+in that Hyprland generation.
+
+All libatspi/PyGObject calls, including Ghostty's accessible-object checks, run
+on one dedicated `everything-atspi-owner` asyncio thread. Native scans and
+activations are submitted there as complete provider operations; they never run
+on the protocol loop or a generic executor, and no secondary GLib event loop
+touches libatspi's process-global D-Bus/cache state. Thread-safe cancellation
+flags are checked between synchronous native calls, while native settle waits
+yield on the owner loop. The protocol loop therefore keeps reading scan and
+shutdown requests and publishing unrelated provider completions while AT-SPI
+is slow. The shell's correlated two-second scan poll is the sole refresh
+trigger; the helper emits no unsolicited accessibility-event snapshot.
 
 Each adapter returns `ProviderResult`: public `Thing` values, nonfatal
 warnings, and private routing metadata. Adapter failure removes only that

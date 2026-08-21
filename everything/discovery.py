@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from .atspi_runtime import AtspiExecutor
 from .commands import CommandError, CommandRunner
 from .model import SnapshotRegistry, TokenError
 from .processes import ProcTable
@@ -16,7 +17,6 @@ from .providers import (
     NeovimProvider,
     TmuxProvider,
 )
-from .providers.atspi import AtspiEventMonitor
 from .providers.base import ProviderResult, ScanContext
 
 
@@ -38,8 +38,7 @@ class DiscoveryManager:
         self.warnings: dict[str, list[str]] = {}
         self.test_mode = test_mode
         self.providers: dict[str, Any] = {}
-        self.event_monitor: AtspiEventMonitor | None = None
-        self.event_scan_callback: Callable[[], None] | None = None
+        self.atspi_executor: AtspiExecutor | None = None
         if not test_mode:
             self.providers = {
                 "hyprland": HyprlandProvider(),
@@ -49,8 +48,33 @@ class DiscoveryManager:
                 "neovim": NeovimProvider(),
             }
             if atspi_available:
+                self.atspi_executor = AtspiExecutor()
                 self.providers["atspi"] = AtspiProvider()
                 self.providers["ghostty"] = GhosttyProvider()
+
+    async def close(self) -> None:
+        if self.atspi_executor is not None:
+            executor = self.atspi_executor
+            self.atspi_executor = None
+            await executor.close()
+
+    async def _scan_provider(self, name: str, context: ScanContext) -> ProviderResult:
+        provider = self.providers[name]
+        if name in {"atspi", "ghostty"} and self.atspi_executor is not None:
+            return await self.atspi_executor.run(lambda: provider.scan(context))
+        return await provider.scan(context)
+
+    async def _activate_provider(
+        self,
+        name: str,
+        activation: dict[str, Any],
+        context: ScanContext,
+    ) -> None:
+        provider = self.providers[name]
+        if name in {"atspi", "ghostty"} and self.atspi_executor is not None:
+            await self.atspi_executor.run(lambda: provider.activate(activation, context))
+            return
+        await provider.activate(activation, context)
 
     def context(self, *, include_ghostty: bool = False) -> ScanContext:
         return ScanContext(
@@ -60,18 +84,6 @@ class DiscoveryManager:
             providers=self.providers,
             include_ghostty=include_ghostty,
         )
-
-    def start_events(self, callback: Callable[[], None]) -> None:
-        if "atspi" not in self.providers or self.event_monitor:
-            return
-        self.event_scan_callback = callback
-        self.event_monitor = AtspiEventMonitor(callback)
-        self.event_monitor.start()
-
-    def stop_events(self) -> None:
-        if self.event_monitor:
-            self.event_monitor.stop()
-        self.event_monitor = None
 
     async def scan(self, request_id: str, *, include_ghostty: bool) -> None:
         if self.test_mode:
@@ -107,7 +119,7 @@ class DiscoveryManager:
 
         async def run_provider(name: str) -> tuple[str, ProviderResult | None, Exception | None]:
             try:
-                return name, await self.providers[name].scan(context), None
+                return name, await self._scan_provider(name, context), None
             except asyncio.CancelledError:
                 raise
             except Exception as error:
@@ -243,7 +255,7 @@ class DiscoveryManager:
             activation = dict(row.thing.activation)
             activation["item_id"] = item_id
             try:
-                await provider.activate(activation, context)
+                await self._activate_provider(provider_name, activation, context)
             except Exception as first_error:
                 if not self._looks_stale(first_error):
                     raise
@@ -254,7 +266,7 @@ class DiscoveryManager:
                     raise StaleThing("That thing closed before it could be focused") from first_error
                 activation = dict(refreshed.thing.activation)
                 activation["item_id"] = item_id
-                await provider.activate(activation, context)
+                await self._activate_provider(provider_name, activation, context)
         except Exception as error:
             stale = isinstance(error, StaleThing) or self._looks_stale(error)
             await self._activation_response(
@@ -273,7 +285,7 @@ class DiscoveryManager:
         context.processes = ProcTable.read()
         context.include_ghostty = provider_name == "ghostty"
         try:
-            result = await self.providers[provider_name].scan(context)
+            result = await self._scan_provider(provider_name, context)
         except Exception:
             return None
         self.metadata[provider_name] = result.metadata

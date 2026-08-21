@@ -46,10 +46,16 @@ The suite performs:
   component-only tabs, capability-tested Pinta/Nautilus action routes,
   Pinta's direct AT-SPI/action indexes and activation method,
   owning-application class names on application-tab metadata,
+  removal of application tabs whose mapped parent window has closed, including
+  same-PID live/unmapped client disambiguation without stale-top rebinding,
+  shared dedicated-owner thread affinity for AT-SPI and Ghostty scans and
+  activation, protocol-loop responsiveness during a blocking native traversal,
+  and cancellation without publishing a partially settled provider generation,
   D-Bus owner/action/signature/index validation, pre/post native-identity
   checks, multi-window ambiguity, and exclusion of document-authored/tool tab
   strips;
-- Hyprland mapped/hidden/group/scratchpad handling and Herdr protocol-20 shape;
+- Hyprland mapped/hidden/group/scratchpad handling, mapped-only child-provider
+  routing with unmapped matching evidence, and Herdr protocol-20 shape;
 - Ghostty effective-binding filtering, 9+ virtualized rows, duplicate
   fingerprint occurrences, fail-closed mutations, and exact-address paired
   key-state construction;
@@ -138,8 +144,10 @@ single refresh followed by a visible stale notification.
   application tabs become rows, duplicate toolkit accessibility IDs remain
   distinct, each row's metadata names its owning application rather than its
   toolkit runtime, every row switches to the exact tab, and every application
-  retains its outer-window row. Close and reopen Everything while Pinta stays
-  open, then confirm all Pinta tabs return. Open two Nautilus windows and
+  retains its outer-window row. Close a parent application while Everything
+  remains open and confirm its tab rows disappear on the next refresh even if
+  the toolkit process remains alive. Close and reopen Everything while Pinta
+  stays open, then confirm all Pinta tabs return. Open two Nautilus windows and
   confirm their ambiguous component-only tabs disappear while both
   outer-window rows remain.
 - Confirm browser rows are title-only and never claim a URL or favicon.
@@ -183,6 +191,12 @@ single refresh followed by a visible stale notification.
 
 ### Lifecycle and recovery
 
+- Leave the panel open while repeatedly opening, renaming, switching, and
+  closing browser, application, and Ghostty tabs across several poll cycles.
+  Confirm the helper remains alive, has exactly one
+  `everything-atspi-owner` thread and no `everything-atspi-events` thread while
+  scans and activations continue, and still responds promptly to shutdown while
+  a slow accessibility peer is present.
 - Open the panel and confirm Ghostty scans once and closes its palette. Leave
   the panel open through several two-second polls and confirm socket/CLI
   updates merge without the modal reopening.

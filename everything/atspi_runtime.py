@@ -6,8 +6,120 @@ import os
 import select
 import signal
 import sys
+import threading
+from collections.abc import Awaitable, Callable
+from concurrent.futures import Future
+from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, TypeVar
+
+
+Result = TypeVar("Result")
+_AT_SPI_CANCEL_EVENT: ContextVar[threading.Event | None] = ContextVar(
+    "everything_atspi_cancel_event",
+    default=None,
+)
+
+
+def atspi_cancel_checkpoint() -> None:
+    """Abort cancelled owner-thread work between synchronous native calls."""
+
+    event = _AT_SPI_CANCEL_EVENT.get()
+    if event is not None and event.is_set():
+        raise asyncio.CancelledError
+
+
+class AtspiExecutor:
+    """Run every in-process AT-SPI operation on one dedicated asyncio thread."""
+
+    def __init__(self) -> None:
+        self._ready = threading.Event()
+        self._lock = threading.Lock()
+        self._cancel_events: set[threading.Event] = set()
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._closed = False
+        self._startup_error: BaseException | None = None
+        self.thread_id: int | None = None
+        self._thread = threading.Thread(
+            target=self._thread_main,
+            name="everything-atspi-owner",
+            daemon=True,
+        )
+        self._thread.start()
+        if not self._ready.wait(2.0):
+            raise RuntimeError("AT-SPI owner thread did not start")
+        if self._startup_error is not None:
+            raise RuntimeError("AT-SPI owner thread failed to start") from self._startup_error
+
+    def _thread_main(self) -> None:
+        loop: asyncio.AbstractEventLoop | None = None
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self._loop = loop
+            self.thread_id = threading.get_ident()
+        except BaseException as error:
+            self._startup_error = error
+            self._ready.set()
+            return
+        self._ready.set()
+        try:
+            loop.run_forever()
+        finally:
+            pending = asyncio.all_tasks(loop)
+            for task in pending:
+                task.cancel()
+            if pending:
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            loop.run_until_complete(loop.shutdown_asyncgens())
+            loop.close()
+            asyncio.set_event_loop(None)
+
+    async def run(self, factory: Callable[[], Awaitable[Result]]) -> Result:
+        with self._lock:
+            if self._closed or self._loop is None:
+                raise RuntimeError("AT-SPI owner thread is closed")
+            cancel_event = threading.Event()
+            self._cancel_events.add(cancel_event)
+            loop = self._loop
+
+        async def invoke() -> Result:
+            token = _AT_SPI_CANCEL_EVENT.set(cancel_event)
+            try:
+                atspi_cancel_checkpoint()
+                return await factory()
+            finally:
+                _AT_SPI_CANCEL_EVENT.reset(token)
+
+        future: Future[Result] = asyncio.run_coroutine_threadsafe(invoke(), loop)
+        try:
+            return await asyncio.wrap_future(future)
+        except asyncio.CancelledError:
+            # Setting the event does not need the owner loop to be runnable, so
+            # a synchronous tree walk observes cancellation at its next native
+            # call even while that loop is occupied by the current coroutine.
+            cancel_event.set()
+            future.cancel()
+            raise
+        finally:
+            with self._lock:
+                self._cancel_events.discard(cancel_event)
+
+    async def close(self) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            events = tuple(self._cancel_events)
+            loop = self._loop
+        for event in events:
+            event.set()
+        if loop is not None:
+            loop.call_soon_threadsafe(loop.stop)
+        # Joining is the only blocking cleanup operation and contains no
+        # native call. Keep it off the protocol loop while in-flight AT-SPI
+        # calls return and observe their cancellation checkpoint.
+        await asyncio.to_thread(self._thread.join)
 
 
 class StatusBackend(Protocol):
@@ -194,4 +306,3 @@ class AtspiGuardClient:
             except TimeoutError:
                 process.kill()
                 await process.wait()
-

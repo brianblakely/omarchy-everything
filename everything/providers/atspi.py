@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import re
-import threading
 import time
 import unicodedata
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Iterator
 
+from ..atspi_runtime import atspi_cancel_checkpoint
 from ..commands import CommandError
 from ..model import Thing, process_birth, stable_id
 from .base import ProviderResult, ScanContext, normalized_address
@@ -84,10 +84,13 @@ def is_browser_app_mode(client: dict[str, Any]) -> bool:
 
 
 def safe_call(default: Any, function: Callable[..., Any], *args: Any) -> Any:
+    atspi_cancel_checkpoint()
     try:
-        return function(*args)
+        result = function(*args)
     except Exception:
         return default
+    atspi_cancel_checkpoint()
+    return result
 
 
 def role(accessible: Any) -> Any:
@@ -246,7 +249,9 @@ class GtkActionBus:
     def __init__(self) -> None:
         if Gio is None or GLib is None:
             raise CommandError("GIO D-Bus bindings are unavailable")
+        atspi_cancel_checkpoint()
         self.connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        atspi_cancel_checkpoint()
         self.pid_destinations: dict[int, list[str]] = {}
 
     def _call(
@@ -257,7 +262,8 @@ class GtkActionBus:
         method: str,
         parameters: Any,
     ) -> Any:
-        return self.connection.call_sync(
+        atspi_cancel_checkpoint()
+        result = self.connection.call_sync(
             destination,
             object_path,
             interface,
@@ -268,6 +274,8 @@ class GtkActionBus:
             GTK_ACTION_TIMEOUT_MS,
             None,
         )
+        atspi_cancel_checkpoint()
+        return result
 
     def _connection_pid(self, destination: str) -> int:
         result = self._call(
@@ -518,8 +526,10 @@ class GtkActionBus:
                 ),
             )
             for delay in GTK_ACTION_STATE_DELAYS:
+                atspi_cancel_checkpoint()
                 if delay:
                     time.sleep(delay)
+                atspi_cancel_checkpoint()
                 enabled, signature, state = self._describe(
                     destination,
                     object_path,
@@ -539,8 +549,8 @@ class AtspiTree:
         if Atspi is None:
             raise CommandError("PyGObject AT-SPI bindings are unavailable")
         result = safe_call(-1, Atspi.init)
-        # libatspi returns 1 when another in-process caller (our event monitor)
-        # has already initialized the singleton; only a negative value fails.
+        # libatspi may return a positive value when the process-local singleton
+        # is already initialized; only a negative value fails.
         if isinstance(result, int) and result < 0:
             raise CommandError("AT-SPI initialization failed")
 
@@ -552,7 +562,7 @@ class AtspiTree:
         out: list[TopLevel] = []
         for application in self.applications():
             pid = int(safe_call(0, application.get_process_id) or 0)
-            candidates = context.clients_for_pid(pid)
+            candidates = context.matching_clients_for_pid(pid)
             if not candidates:
                 # Some toolkits expose an app-side helper PID. Match only when
                 # it has exactly one managed ancestor, never by a loose title.
@@ -564,13 +574,29 @@ class AtspiTree:
                     (process.pid for process in ancestors if process.pid in managed_pids),
                     None,
                 )
-                candidates = context.clients_for_pid(ancestor or 0)
+                candidates = context.matching_clients_for_pid(ancestor or 0)
             if not candidates:
                 continue
+            matched_tops: list[tuple[int, Any, str, dict[str, Any], str]] = []
             for top_index, top in enumerate(children(application)):
                 top_name = clean_text(safe_call("", top.get_name))
                 matched = self._match_client(top_name, candidates)
                 if not matched:
+                    continue
+                address = normalized_address(matched.get("address"))
+                if address:
+                    matched_tops.append((top_index, top, top_name, matched, address))
+
+            address_counts: dict[str, int] = {}
+            for _index, _top, _name, _client, address in matched_tops:
+                address_counts[address] = address_counts.get(address, 0) + 1
+            for top_index, top, top_name, matched, address in matched_tops:
+                # Unmapped records participate in matching only. If the stale
+                # top resolves to one, reject it rather than removing that
+                # evidence and rebinding it to a live same-PID client. Multiple
+                # tops claiming one address are equally ambiguous and all fail
+                # closed instead of accepting whichever the toolkit lists first.
+                if matched.get("mapped") is False or address_counts[address] != 1:
                     continue
                 if not include_ghostty and GHOSTTY_CLASS.search(
                     str(matched.get("class") or "")
@@ -584,8 +610,6 @@ class AtspiTree:
         top_name: str,
         clients: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
-        if len(clients) == 1:
-            return clients[0]
         wanted = folded(top_name)
         exact = [
             client
@@ -677,49 +701,6 @@ class AtspiTree:
         return result
 
 
-class AtspiEventMonitor:
-    EVENT_TYPES = (
-        "object:children-changed",
-        "object:property-change:accessible-name",
-        "object:state-changed:selected",
-        "window:activate",
-        "window:create",
-        "window:destroy",
-    )
-
-    def __init__(self, callback: Callable[[], None]) -> None:
-        self.callback = callback
-        self.listener: Any = None
-        self.loop: Any = None
-        self.thread: threading.Thread | None = None
-
-    def start(self) -> None:
-        if Atspi is None or GLib is None or self.thread:
-            return
-
-        def run() -> None:
-            safe_call(None, Atspi.init)
-            self.listener = Atspi.EventListener.new(lambda _event: self.callback())
-            for event_type in self.EVENT_TYPES:
-                safe_call(False, self.listener.register, event_type)
-            self.loop = GLib.MainLoop()
-            self.loop.run()
-            for event_type in self.EVENT_TYPES:
-                safe_call(False, self.listener.deregister, event_type)
-
-        self.thread = threading.Thread(target=run, name="everything-atspi-events", daemon=True)
-        self.thread.start()
-
-    def stop(self) -> None:
-        if self.loop:
-            safe_call(None, self.loop.quit)
-        if self.thread:
-            self.thread.join(timeout=1.0)
-        self.thread = None
-        self.loop = None
-        self.listener = None
-
-
 class AtspiProvider:
     name = "atspi"
 
@@ -743,30 +724,21 @@ class AtspiProvider:
         return self.gtk_actions.routes(app_class, pid, top_name, tabs)
 
     async def scan(self, context: ScanContext) -> ProviderResult:
-        cancellation = threading.Event()
-        try:
-            return await asyncio.to_thread(self._scan_sync, context, cancellation)
-        except asyncio.CancelledError:
-            cancellation.set()
-            raise
-
-    def _scan_sync(
-        self,
-        context: ScanContext,
-        cancellation: threading.Event | None = None,
-    ) -> ProviderResult:
-        cancelled = cancellation or threading.Event()
+        # Discovery dispatches this entire coroutine to the single AT-SPI
+        # executor. Its asyncio sleeps are cancellable there, while the helper's
+        # protocol loop and unrelated providers remain independently runnable.
         expected = self._browser_clients(context)
         current_identities = set(expected)
-        self.settled_browser_clients.intersection_update(current_identities)
+        settled = self.settled_browser_clients & current_identities
 
         best = self._collect(context)
-        self.settled_browser_clients = {
+        await asyncio.sleep(0)
+        settled = {
             identity
-            for identity in self.settled_browser_clients
+            for identity in settled
             if expected[identity] in best[2]
         }
-        new_identities = current_identities - self.settled_browser_clients
+        new_identities = current_identities - settled
         if new_identities:
             expected_addresses = {expected[identity] for identity in new_identities}
             best_coverage = len(best[2] & expected_addresses)
@@ -774,29 +746,28 @@ class AtspiProvider:
                 if best_coverage == len(expected_addresses):
                     break
                 # Chromium can publish its top-level frame before the native
-                # browser controls arrive on AT-SPI. The event listener is
-                # already active; give that bounded lazy tree construction a
-                # chance to finish before publishing the first browser rows.
-                if cancelled.wait(delay):
-                    break
+                # browser controls arrive on AT-SPI. Yield during the bounded
+                # settle pass so newer protocol scans can cancel this one and
+                # independent non-AT-SPI providers can keep making progress.
+                await asyncio.sleep(delay)
                 candidate = self._collect(context)
+                await asyncio.sleep(0)
                 coverage = len(candidate[2] & expected_addresses)
                 if coverage > best_coverage or (
                     coverage == best_coverage and len(candidate[0]) > len(best[0])
                 ):
                     best = candidate
                     best_coverage = coverage
-            if not cancelled.is_set():
-                covered_addresses = best[2] & expected_addresses
-                self.settled_browser_clients.update(
-                    identity
-                    for identity in new_identities
-                    if expected[identity] in covered_addresses
-                )
+            covered_addresses = best[2] & expected_addresses
+            settled.update(
+                identity
+                for identity in new_identities
+                if expected[identity] in covered_addresses
+            )
 
         items, objects, _browser_addresses = best
-        if not cancelled.is_set():
-            self.objects = objects
+        self.settled_browser_clients = settled
+        self.objects = objects
         return ProviderResult(self.name, items)
 
     @staticmethod
@@ -850,6 +821,12 @@ class AtspiProvider:
 
         for top, app_class, is_browser, pid, tabs, has_atspi_route in candidates:
             address = normalized_address(top.client.get("address"))
+            parent = self._window_parent_id(context, address)
+            # Native tabs are subordinate to an exact managed window. A stale
+            # toolkit application/tree can outlive that window, but it must not
+            # remain independently actionable or visible in the panel.
+            if not parent:
+                continue
             if has_atspi_route:
                 tab_routes = [{"kind": "atspi-action"} for _tab in tabs]
             else:
@@ -861,7 +838,6 @@ class AtspiProvider:
             if is_browser:
                 browser_addresses.add(address)
             birth = process_birth(pid)
-            parent = self._window_parent_id(context, address)
             active_window = int(top.client.get("focusHistoryID") or 0) == 0
             kind = "browser-tab" if is_browser else "app-tab"
             provider_name = self._provider_name(app_class, is_browser)
@@ -976,13 +952,13 @@ class AtspiProvider:
         route = dict(tab_route) if isinstance(tab_route, dict) else {}
         route_kind = str(route.get("kind") or "")
         if route_kind == "atspi-action":
-            if not await asyncio.to_thread(invoke_accessible_action, tab.accessible):
+            if not invoke_accessible_action(tab.accessible):
                 raise CommandError("native tab activation action failed")
         elif route_kind == "gtk-action":
             if self.gtk_actions is None:
                 raise CommandError("native application tab action is unavailable")
             self._validated_gtk_tab(tab, native_id, route)
-            await asyncio.to_thread(self.gtk_actions.activate, route, pid)
+            self.gtk_actions.activate(route, pid)
             self._validated_gtk_tab(tab, native_id, route)
         else:
             raise CommandError("native tab activation route is invalid")

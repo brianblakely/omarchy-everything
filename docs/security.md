@@ -101,6 +101,16 @@ live native tab's exposed preferred action. Component focus is not treated as
 a generic tab activation capability; its remaining use is inside Ghostty's
 separately capability-tested palette bridge.
 
+The helper calls libatspi and its PyGObject accessible interfaces only from one
+dedicated asyncio thread named `everything-atspi-owner`. Both the native-tab
+and Ghostty adapters submit their complete scans and activations to that same
+owner. The protocol loop never makes a native accessibility call, and the
+helper starts neither a GLib accessibility-event thread nor parallel executor
+jobs that could concurrently mutate libatspi's process-global D-Bus connection
+or accessible cache. Cancellation uses thread-safe flags checked between
+synchronous native calls; owner-loop settle delays remain cancellable without
+crossing the native thread-affinity boundary.
+
 ## Session D-Bus GTK actions
 
 The Pinta and Nautilus adapters make bounded calls on the existing user

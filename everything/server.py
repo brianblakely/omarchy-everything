@@ -20,10 +20,7 @@ class JsonLineServer:
         self.scan_task: asyncio.Task[None] | None = None
         self.activation_tasks: set[asyncio.Task[None]] = set()
         self.stopping = False
-        self.event_pending = False
-        self.event_timer: asyncio.TimerHandle | None = None
         self.output_lock = asyncio.Lock()
-        self.loop: asyncio.AbstractEventLoop | None = None
 
     async def emit(self, message: dict[str, Any]) -> None:
         async with self.output_lock:
@@ -31,7 +28,7 @@ class JsonLineServer:
             sys.stdout.flush()
 
     async def run(self) -> int:
-        self.loop = asyncio.get_running_loop()
+        loop = asyncio.get_running_loop()
         atspi_available = True
         guard_warning = ""
         if not self.test_mode:
@@ -44,9 +41,6 @@ class JsonLineServer:
         )
         if guard_warning:
             self.manager.warnings["atspi-runtime"] = [guard_warning]
-        if atspi_available and not self.test_mode:
-            self.manager.start_events(self._event_from_thread)
-
         await self.emit(
             {
                 "version": PROTOCOL_VERSION,
@@ -68,7 +62,7 @@ class JsonLineServer:
 
         for signum in (signal.SIGTERM, signal.SIGINT):
             try:
-                self.loop.add_signal_handler(signum, stop)
+                loop.add_signal_handler(signum, stop)
             except NotImplementedError:
                 pass
 
@@ -80,7 +74,7 @@ class JsonLineServer:
         await asyncio.gather(reader_task, return_exceptions=True)
         await self._cancel_work()
         if self.manager:
-            self.manager.stop_events()
+            await self.manager.close()
         await self.guard.stop()
         return 0
 
@@ -139,33 +133,6 @@ class JsonLineServer:
             self.manager.scan(request_id, include_ghostty=include_ghostty), name=f"scan:{request_id}"
         )
 
-    def _event_from_thread(self) -> None:
-        if not self.loop or self.stopping:
-            return
-        self.loop.call_soon_threadsafe(self._debounce_event_scan)
-
-    def _debounce_event_scan(self) -> None:
-        if self.stopping:
-            return
-        self.event_pending = True
-        if self.event_timer:
-            self.event_timer.cancel()
-        self.event_timer = self.loop.call_later(0.25, self._start_event_scan) if self.loop else None
-
-    def _start_event_scan(self) -> None:
-        self.event_timer = None
-        if self.stopping or not self.event_pending:
-            return
-        if self.scan_task and not self.scan_task.done():
-            if self.loop:
-                self.event_timer = self.loop.call_later(0.35, self._start_event_scan)
-            return
-        self.event_pending = False
-        assert self.manager is not None
-        self.scan_task = asyncio.create_task(
-            self.manager.scan("event", include_ghostty=False), name="scan:event"
-        )
-
     async def _protocol_error(self, request_id: str, message: str) -> None:
         await self.emit(
             {
@@ -188,6 +155,3 @@ class JsonLineServer:
                 tasks.append(task)
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-        if self.event_timer:
-            self.event_timer.cancel()
-            self.event_timer = None

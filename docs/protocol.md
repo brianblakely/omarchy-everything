@@ -37,6 +37,14 @@ Shut down cleanly and restore temporary runtime state:
 
 A newer scan cancels an unfinished older scan. Shutdown cancels scans and
 activations before the AT-SPI guard is released.
+AT-SPI and Ghostty work runs on a dedicated native-owner loop, so a synchronous
+accessibility traversal cannot prevent the protocol loop from reading either
+request. Cancellation is signaled directly to that owner and checked between
+native calls; no later partial or full snapshot is emitted for the cancelled
+request.
+Snapshots are emitted only for explicit scan requests. `Service.qml` supplies
+the periodic liveness poll; the helper does not publish unsolicited AT-SPI
+event snapshots, so every snapshot remains correlated to a current caller ID.
 
 ## Responses
 
