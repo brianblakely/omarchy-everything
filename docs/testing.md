@@ -28,6 +28,7 @@ The suite performs:
   automatic discovery continues;
 - native list-scrollbar placement with a right-shifted nub using the current
   theme accent palette;
+- invariant bar-icon foreground color while the panel is active;
 - every documented keyboard alias, horizontal group collapse/expand, vertical
   skipping of hidden rows, focus-sensitive Delete/Backspace ownership, safe
   selection after removal, keyboard-to-first scroll reset, stationary-pointer
@@ -55,13 +56,14 @@ The suite performs:
 - Neovim's unique/ambiguous Herdr and multi-surface Ghostty routing;
 - QML lint and an offscreen Quickshell fixture that synchronously loads both
   entrypoints, verifies the chevron's painted horizontal center without
-  changing its shell slot or pointer target, exercises two independent monitor
-  leases, and covers right-click checklist routing, all supported checkbox
-  rows, pointer and keyboard toggles, immediate filtering, persistence calls,
-  cross-monitor settings injection, selection recovery, mode switching, and
-  results-only lease transitions. The fixture swaps only compositor-dependent
-  `KeyboardPanel` for an API-equivalent test double, because Qt's offscreen
-  backend cannot instantiate a layer-shell `PanelWindow`;
+  changing its shell slot, pointer target, or foreground color, exercises two
+  independent monitor leases, and covers right-click checklist routing, all
+  supported checkbox rows, pointer and keyboard toggles, immediate filtering,
+  persistence calls, cross-monitor settings injection, selection recovery,
+  mode switching, and results-only lease transitions. The fixture swaps only
+  compositor-dependent `KeyboardPanel` for an API-equivalent test double,
+  because Qt's offscreen backend cannot instantiate a layer-shell
+  `PanelWindow`;
 - `omarchy plugin validate .` against the installed current manifest schema.
 
 ## Live helper smoke test

@@ -586,6 +586,7 @@ Panel {
     anchors.fill: parent
     bar: root.bar
     text: "\uf078"
+    useActiveColor: false
     iconComponent: Component {
       Item {
         id: chevronFrame

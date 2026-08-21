@@ -117,6 +117,10 @@ ShellRoot {
         failRefreshTest("bar icon controls not found")
         return
       }
+      if (barButton.useActiveColor) {
+        failRefreshTest("active panel state recolors the bar icon")
+        return
+      }
       if (Math.abs(barChevron.centerErrorX) > 0.01) {
         failRefreshTest("bar chevron is not horizontally centered: "
           + barChevron.centerErrorX)
@@ -255,6 +259,12 @@ ShellRoot {
       }
       widgetObject.open()
     } else if (refreshTestStage === 9) {
+      var activeBarButton = findNamed(widgetObject, "everything-bar-button")
+      if (!activeBarButton || !activeBarButton.active
+          || activeBarButton.useActiveColor) {
+        failRefreshTest("open panel did not preserve the bar icon color")
+        return
+      }
       widgetObject.focusList(22)
       listObject.contentY = listObject.originY + widgetObject.rowTopAt(8) + 9
       if (listObject.currentIndex !== 22 || listObject.contentY <= listObject.originY) {

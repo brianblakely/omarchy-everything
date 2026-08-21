@@ -452,6 +452,10 @@ const searchHandler = qml.slice(qml.indexOf("id: searchField"), resultListStart)
 const resultDelegateStart = qml.indexOf("\n        delegate: Item", resultListStart)
 const listHandler = qml.slice(resultListStart, resultDelegateStart)
 const resultDelegateHandler = qml.slice(resultDelegateStart, qml.indexOf("MouseArea", resultDelegateStart))
+const barButtonHandler = qml.slice(qml.indexOf("BarIconButton {"),
+  qml.indexOf("KeyboardPanel {"))
+assert.match(barButtonHandler, /useActiveColor:\s*false/,
+  "opening the panel does not recolor its bar icon")
 assert.doesNotMatch(searchHandler, /Key_Backspace|Key_Delete/, "search owns editing keys")
 assert.match(searchHandler, /placeholderText:\s*"Search everything…"/,
   "the search placeholder uses the requested copy")
