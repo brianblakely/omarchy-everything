@@ -162,7 +162,12 @@ adapter's internal rows; an outer managed-window result remains available.
 The AT-SPI adapter owns native-tab structural validation, native-control
 settling, and the private capability-tested GTK action routes used by current
 Pinta and Nautilus. Those action destinations, object paths, names, and integer
-indexes remain inside the opaque activation token. An exact browser client
+indexes remain inside the opaque activation token. Each provider lifetime and
+each change to the exact browser/Pinta/Nautilus client set first publishes a
+priority-only generation. Generic toolkit trees are traversed on a later poll
+and merged only after that priority set has published, so a slow unrelated
+application cannot hold back actionable tabs from those current adapters. An
+exact browser client
 remains eligible for bounded retries on later polls until its own actionable
 native tab strip is observed; merely exhausting one settle pass does not make
 an empty accessibility frame authoritative. A later scan that loses previously

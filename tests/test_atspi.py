@@ -325,8 +325,10 @@ class NativeTabTests(unittest.IsolatedAsyncioTestCase):
         provider = AtspiProvider()
         old_objects = {"old": object()}
         old_settled = {("0xold", 7, "old-birth")}
+        old_priority = {("0xold", 7, "old-birth")}
         provider.objects = old_objects  # type: ignore[assignment]
         provider.settled_browser_clients = old_settled
+        provider.published_priority_clients = old_priority
 
         with patch("everything.providers.atspi.AtspiTree", UncoveredTree), patch(
             "everything.providers.atspi.NATIVE_TAB_SETTLE_DELAYS", (60,)
@@ -339,6 +341,7 @@ class NativeTabTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIs(provider.objects, old_objects)
         self.assertIs(provider.settled_browser_clients, old_settled)
+        self.assertIs(provider.published_priority_clients, old_priority)
 
     def test_chromium_default_action_activates_a_tab(self) -> None:
         tab = FakeAccessible(
@@ -756,6 +759,108 @@ class NativeTabTests(unittest.IsolatedAsyncioTestCase):
             {("0xabc", 42, "birth")},
         )
 
+    async def test_provider_publishes_priority_tabs_before_generic_application_tabs(
+        self,
+    ) -> None:
+        nautilus_client = {
+            "address": "0xnautilus",
+            "pid": 42,
+            "class": "org.gnome.Nautilus",
+            "title": "Home",
+            "focusHistoryID": 0,
+        }
+        editor_client = {
+            "address": "0xeditor",
+            "pid": 43,
+            "class": "org.example.Editor",
+            "title": "Draft",
+            "focusHistoryID": 1,
+        }
+        nautilus_top = TopLevel(
+            None, object(), 42, 0, nautilus_client["title"], nautilus_client
+        )
+        editor_top = TopLevel(
+            None, object(), 43, 0, editor_client["title"], editor_client
+        )
+        nautilus_tab = NativeTab(
+            accessible=self.component_tab("Home", "nautilus-tab", selected=True),
+            top=nautilus_top,
+            strip_path=(0,),
+            tab_path=(0, 0),
+            index=0,
+            title="Home",
+            selected=True,
+            native_id="nautilus-tab",
+        )
+        editor_tab = NativeTab(
+            accessible=self.tab("Draft", "editor-tab", selected=True),
+            top=editor_top,
+            strip_path=(0,),
+            tab_path=(0, 0),
+            index=0,
+            title="Draft",
+            selected=True,
+            native_id="editor-tab",
+        )
+
+        class PriorityTree:
+            calls: list[str] = []
+
+            def top_levels(self, _context):
+                return [nautilus_top, editor_top]
+
+            def native_tabs(self, top, *, browser):
+                self.__class__.calls.append(top.client["address"])
+                if top is nautilus_top:
+                    return [nautilus_tab]
+                return [editor_tab]
+
+        class NautilusRoutes:
+            def routes(self, *_args):
+                return [{"kind": "gtk-action"}]
+
+        clients = [nautilus_client, editor_client]
+        context = ScanContext(
+            runner=CommandRunner(),
+            processes=ProcTable({}),
+            hypr_clients=clients,
+            provider_metadata={
+                "hyprland": {
+                    "clients": [
+                        {
+                            "address": client["address"],
+                            "item_id": f"hyprland:{client['address']}",
+                        }
+                        for client in clients
+                    ]
+                }
+            },
+        )
+        provider = AtspiProvider()
+        # Model a running provider that already published an empty priority
+        # client set before Nautilus opened.
+        provider.published_priority_clients = set()
+        provider.gtk_actions = NautilusRoutes()  # type: ignore[assignment]
+
+        with patch("everything.providers.atspi.AtspiTree", PriorityTree), patch(
+            "everything.providers.atspi.process_birth", return_value="birth"
+        ):
+            first = await provider.scan(context)
+            first_calls = list(PriorityTree.calls)
+            second = await provider.scan(context)
+
+        self.assertEqual(first_calls, ["0xnautilus"])
+        self.assertEqual([item.title for item in first.items], ["Home"])
+        self.assertEqual(
+            PriorityTree.calls,
+            ["0xnautilus", "0xnautilus", "0xeditor"],
+        )
+        self.assertEqual([item.title for item in second.items], ["Home", "Draft"])
+        self.assertEqual(
+            provider.published_priority_clients,
+            {("0xnautilus", 42, "birth")},
+        )
+
     async def test_provider_drops_application_tabs_without_their_mapped_parent(self) -> None:
         client = {
             "address": "0xabc",
@@ -792,6 +897,7 @@ class NativeTabTests(unittest.IsolatedAsyncioTestCase):
             provider_metadata={"hyprland": {"clients": []}},
         )
         provider = AtspiProvider()
+        provider.published_priority_clients = set()
 
         with patch("everything.providers.atspi.AtspiTree", LingeringTree), patch(
             "everything.providers.atspi.process_birth", return_value="birth"
@@ -913,6 +1019,7 @@ class NativeTabTests(unittest.IsolatedAsyncioTestCase):
             },
         )
         provider = AtspiProvider()
+        provider.published_priority_clients = set()
 
         class NoRoutes:
             def __init__(self):

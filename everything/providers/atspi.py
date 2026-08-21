@@ -711,6 +711,7 @@ class AtspiProvider:
         self.objects: dict[str, NativeTab] = {}
         self.settled_browser_clients: set[tuple[str, int, str]] = set()
         self.settled_application_clients: set[tuple[str, int, str]] = set()
+        self.published_priority_clients: set[tuple[str, int, str]] | None = None
         self.gtk_actions: GtkActionBus | None = None
 
     def _gtk_action_routes(
@@ -735,12 +736,13 @@ class AtspiProvider:
         expected_applications = self._application_clients(context)
         browser_identities = set(expected_browsers)
         application_identities = set(expected_applications)
+        priority_identities = browser_identities | application_identities
         settled_browsers = self.settled_browser_clients & browser_identities
         settled_applications = (
             self.settled_application_clients & application_identities
         )
 
-        best = self._collect(context)
+        best = self._collect(context, priority=True)
         await asyncio.sleep(0)
         settled_browsers = {
             identity
@@ -771,7 +773,7 @@ class AtspiProvider:
                 # so newer protocol scans can cancel this one and independent
                 # non-AT-SPI providers can keep making progress.
                 await asyncio.sleep(delay)
-                candidate = self._collect(context)
+                candidate = self._collect(context, priority=True)
                 await asyncio.sleep(0)
                 coverage = len(candidate[2] & expected_addresses)
                 if coverage > best_coverage or (
@@ -791,9 +793,26 @@ class AtspiProvider:
             # ordinary polls discover tabs without delaying every generation.
             settled_applications.update(first_seen_applications)
 
+        # Publish a fast generation before traversing arbitrary toolkit trees.
+        # Some otherwise unrelated applications take several seconds to answer
+        # synchronous AT-SPI calls. They must not hold back a newly started
+        # provider or a newly opened browser, Pinta, or Nautilus window. Once
+        # the current priority-client set has been published, probe generic
+        # applications on a later ordinary poll and merge those rows.
+        if self.published_priority_clients == priority_identities:
+            generic_items, generic_objects, generic_coverage = self._collect(
+                context, priority=False
+            )
+            best = (
+                best[0] + generic_items,
+                {**best[1], **generic_objects},
+                best[2] | generic_coverage,
+            )
+
         items, objects, _covered_addresses = best
         self.settled_browser_clients = settled_browsers
         self.settled_application_clients = settled_applications
+        self.published_priority_clients = priority_identities
         self.objects = objects
         return ProviderResult(self.name, items)
 
@@ -834,7 +853,7 @@ class AtspiProvider:
         return out
 
     def _collect(
-        self, context: ScanContext
+        self, context: ScanContext, *, priority: bool
     ) -> tuple[list[Thing], dict[str, NativeTab], set[str]]:
         tree = AtspiTree()
         objects: dict[str, NativeTab] = {}
@@ -851,6 +870,11 @@ class AtspiProvider:
             if is_browser_app_mode(top.client):
                 continue
             is_browser = bool(BROWSER_CLASS.search(app_class))
+            is_priority = (
+                is_browser or app_class.lower() in GTK_ACTION_APPLICATION_CLASSES
+            )
+            if priority != is_priority:
+                continue
             tabs = tree.native_tabs(top, browser=is_browser)
             if not tabs:
                 continue

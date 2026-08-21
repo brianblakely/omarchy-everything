@@ -42,7 +42,9 @@ The suite performs:
   matching, repeated bounded settling until exact browser coverage and after
   transient coverage loss, one bounded first-seen settle for supported
   application windows without repeated delays for a legitimately empty
-  window, emitted browser-tab rows, app-mode exclusion,
+  window, priority-only publication before deferred generic traversal at
+  provider startup and after the priority client set changes, emitted
+  browser-tab rows, app-mode exclusion,
   native default-action activation, deep GTK 4 tab lists with one transparent
   grouping wrapper, repeated toolkit accessibility IDs, rejection of generic
   component-only tabs, capability-tested Pinta/Nautilus action routes,

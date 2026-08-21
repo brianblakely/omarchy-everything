@@ -61,6 +61,13 @@ application may legitimately expose no tab yet. Its window identity is
 therefore marked attempted after the first bounded pass; subsequent ordinary
 polls still discover newly added tabs without imposing the settle delay on
 every generation.
+The first AT-SPI generation, and the first generation after the exact
+browser/Pinta/Nautilus client set changes, traverses only those priority
+clients. Once that set has published, a later poll also traverses generic
+GTK/Qt applications and merges their actionable tabs. Generic application
+tabs can consequently appear one poll later, while a slow unrelated toolkit
+tree cannot delay the first actionable rows for a newly opened priority
+window.
 The settle waits are cancellable asyncio delays. The tree reads before and
 after each wait run on the dedicated AT-SPI owner thread alongside every other
 libatspi call. The protocol loop remains independent, and no additional
