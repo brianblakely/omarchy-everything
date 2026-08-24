@@ -712,6 +712,9 @@ assert.match(qml, /readonly property bool agentEnabled:\s*root\.setting\("agentE
 assert.match(qml,
   /function submitAgentCommand[\s\S]*dirs\.length === 0[\s\S]*agentComposeError =/,
   "run\/plan submission refuses to proceed without a configured allowed folder")
+assert.match(qml,
+  /id:\s*turnText[\s\S]*textFormat:\s*turnRow\.modelData\.role === "user" \? Text\.PlainText : Text\.MarkdownText/,
+  "agent/system turns render markdown; the user's own literal prompt never gets reinterpreted")
 
 assert.match(serviceQml, /Process\s*\{\s*\n\s*id:\s*agentHelper/,
   "the agent subsystem runs its own second helper process")

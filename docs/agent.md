@@ -29,6 +29,13 @@ below):
 - Escape steps back to the history browser rather than fully closing while a
   conversation is open, matching the panel's existing "first Escape softens,
   second Escape closes" feel.
+- Agent and system turns render as markdown (bold, lists, code spans,
+  headings, links) via Qt's built-in `Text.MarkdownText`, not a custom
+  renderer — no syntax highlighting inside code blocks, but headings, lists,
+  emphasis, and inline code all render properly instead of showing literal
+  `**`/`` ` ``. The user's own typed prompt is deliberately rendered as plain
+  text instead (`Text.PlainText`) so a stray `*` or `_` they typed is never
+  reinterpreted as markdown.
 
 Nothing here bypasses permissions. `!<text>` deliberately does not use
 Claude Code's `--dangerously-skip-permissions`, Codex's

@@ -1486,10 +1486,17 @@ Panel {
             anchors.right: parent.right
             anchors.margins: Style.space(8)
             text: String(turnRow.modelData.text || "")
+            // The user's own literal prompt is rendered as plain text so a
+            // stray "*" or "_" they typed is never reinterpreted as
+            // emphasis; agent/system turns get real markdown (bold, lists,
+            // code spans, headings, links) via Qt's built-in renderer.
+            textFormat: turnRow.modelData.role === "user" ? Text.PlainText : Text.MarkdownText
             color: root.foreground
+            linkColor: Color.accent
             wrapMode: Text.Wrap
             font.family: Style.font.family
             font.pixelSize: Style.font.body
+            onLinkActivated: function(link) { Qt.openUrlExternally(link) }
           }
         }
 
