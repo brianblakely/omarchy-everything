@@ -1295,7 +1295,7 @@ Panel {
       Text {
         id: agentFoldersLink
         objectName: "everything-agent-folders-link"
-        visible: root.popupMode === root.groupsMode && root.agentEnabled
+        visible: root.popupMode === root.groupsMode
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
@@ -1650,10 +1650,58 @@ Panel {
           }
         }
 
+        Item {
+          id: agentEnabledRow
+          objectName: "everything-agent-enabled-toggle"
+          anchors.top: foldersBackLink.bottom
+          anchors.topMargin: Style.space(4)
+          anchors.left: parent.left
+          anchors.right: parent.right
+          height: root.groupChecklistRowHeight
+
+          Accessible.role: Accessible.CheckBox
+          Accessible.name: "Enable AI agent commands"
+          Accessible.checkable: true
+          Accessible.checked: root.agentEnabled
+          Accessible.onPressAction: root.persistAgentEnabled(!root.agentEnabled)
+          Accessible.onToggleAction: root.persistAgentEnabled(!root.agentEnabled)
+
+          Text {
+            id: agentEnabledCheckmark
+            anchors.left: parent.left
+            anchors.leftMargin: Style.space(8)
+            anchors.verticalCenter: parent.verticalCenter
+            width: Style.space(24)
+            text: root.agentEnabled ? "\uf14a" : "\uf0c8"
+            color: root.agentEnabled ? Color.accent : root.dimForeground
+            font.family: Style.font.family
+            font.pixelSize: Style.font.body
+            horizontalAlignment: Text.AlignHCenter
+          }
+
+          Text {
+            anchors.left: agentEnabledCheckmark.right
+            anchors.leftMargin: Style.space(8)
+            anchors.right: parent.right
+            anchors.rightMargin: Style.space(8)
+            anchors.verticalCenter: parent.verticalCenter
+            text: "Enable ! agent commands"
+            color: root.foreground
+            font.family: Style.font.family
+            font.pixelSize: Style.font.body
+          }
+
+          MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.persistAgentEnabled(!root.agentEnabled)
+          }
+        }
+
         TextField {
           id: newFolderField
           objectName: "everything-new-folder"
-          anchors.top: foldersBackLink.bottom
+          anchors.top: agentEnabledRow.bottom
           anchors.topMargin: Style.space(4)
           anchors.left: parent.left
           anchors.right: parent.right
