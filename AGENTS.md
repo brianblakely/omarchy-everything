@@ -16,6 +16,10 @@ Follow the linked document for the boundary you are changing.
   `/proc`, AT-SPI, synthetic input, trust checks, and persistence limits.
 - [Testing](docs/testing.md) — automated coverage, fixtures, smoke tests, and
   the manual acceptance matrix.
+- [AI agent commands](docs/agent.md) — the opt-in `!`/`@` subsystem: its own
+  process, protocol, adapters, settings, and transcript store. A second,
+  deliberately isolated boundary on top of the ones above it — read this
+  before touching anything under `everything/agent/`.
 - [README](README.md) — user-facing behavior, installation, controls, and
   limitations. Preserve its prose; make only changes required by the feature.
 
@@ -32,6 +36,7 @@ Follow the linked document for the boundary you are changing.
 | Thing identity and opaque tokens | `everything/model.py` | Architecture, Protocol |
 | Native adapters and routing | `everything/providers/` | Providers, Security |
 | AT-SPI, commands, and process metadata | `everything/atspi_runtime.py`, `everything/commands.py`, `everything/processes.py` | Security |
+| Opt-in agent commands: second helper, protocol, adapters, transcript store | `everything/agent/`, `helper/everything_agent_helper.py` | AI agent commands |
 | Automated and live verification | `tests/` | Testing |
 
 ## Working rules

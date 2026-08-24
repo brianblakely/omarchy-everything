@@ -232,10 +232,31 @@ Runtime authority and cleanup belong in [security](security.md).
 - Provider failures are isolated and nonfatal. Ambiguous native routing fails
   closed or uses the documented fresh-client behavior instead of guessing.
 - No network request, privileged operation, install hook, persistent worker,
-  or on-disk hidden-state store is introduced.
+  or on-disk hidden-state store is introduced **into this discovery
+  boundary**. The one documented exception is the opt-in AI agent subsystem
+  described below and in [AI agent commands](agent.md), which is off by
+  default, runs as a second and fully separate process, and exists
+  specifically to make network calls, spawn longer-running subprocesses, and
+  keep a real on-disk transcript store — scoped to that boundary alone and
+  never mixed into the discovery helper's process, protocol, or tests.
 
 See [security](security.md) for the exhaustive authority list and
 [testing](testing.md) for the verification matrix.
+
+## AI agent commands
+
+A second, deliberately isolated boundary layered on the same `Everything.qml`
+panel: typing `!` switches the search field from ranking discovered things to
+composing or browsing a command for the user's configured AI coding agent.
+It has its own process (`Service.qml`'s `agentHelper`, a second
+`Quickshell.Io.Process`, never sharing state with the discovery `helper`
+above), its own independently-versioned JSON-lines protocol, its own Python
+package (`everything/agent/`), and its own on-disk transcript store. Off by
+default (`agentEnabled` setting) and inert — `!` behaves as a literal
+character in a normal search — until the user opts in and configures at
+least one allowed folder. See [AI agent commands](agent.md) for the full
+design: supported agents and why others are excluded, the protocol, the
+transcript store, and the settings.
 
 ## Evolving boundaries
 

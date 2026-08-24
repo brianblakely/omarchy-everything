@@ -873,6 +873,109 @@ function reconcileItems(currentItems, incomingItems) {
   return { items: next, changed: true }
 }
 
+// --- Agent commands (!/@) -------------------------------------------------
+// Pure parsing only. Deliberately outside GROUP_CATALOG: agent runs and past
+// conversations are not a discovery "kind" and never go through rank() —
+// see docs/agent.md.
+
+var AGENT_MODE_KEYWORDS = { ask: true, plan: true }
+
+// Detects the leading "!" that switches the search field from ranking
+// things to composing/browsing agent commands. Returns null when the text
+// is unaffected (does not start with "!"), so callers can fall straight
+// through to the normal rank() path with no extra branching.
+function parseAgentCommand(text) {
+  var raw = String(text === undefined || text === null ? "" : text)
+  if (raw.charAt(0) !== "!") return null
+  var rest = raw.slice(1)
+  // Only an exact bare "!" opens the history browser. "!" followed by
+  // whitespace (e.g. programmatically set to "! " to keep composing after a
+  // submit or when continuing a past conversation) is a signal the user is
+  // about to type a prompt, not a request to see history again.
+  if (rest.length === 0) return { type: "history" }
+
+  var cursor = rest.replace(/^\s+/, "")
+  var mode = "run"
+  var keywordMatch = cursor.match(/^(ask|plan)(\s+|$)/)
+  if (keywordMatch && AGENT_MODE_KEYWORDS[keywordMatch[1]] === true) {
+    mode = keywordMatch[1]
+    cursor = cursor.slice(keywordMatch[0].length)
+  }
+
+  var attachments = []
+  while (true) {
+    var tokenMatch = cursor.match(/^@(\S+)\s*/)
+    if (!tokenMatch) break
+    attachments.push(tokenMatch[1])
+    cursor = cursor.slice(tokenMatch[0].length)
+  }
+
+  return { type: "run", mode: mode, attachments: attachments, prompt: cursor }
+}
+
+// Resolves one "@token" against the user's configured allowed folders (v1
+// scope: attach a configured folder by name, not an arbitrary running
+// thing's cwd — see docs/agent.md for the follow-up this leaves open).
+// Exact leaf or full-path match wins; otherwise the first folder whose leaf
+// name starts with the token. Unresolved tokens return "".
+function resolveAttachment(token, allowedDirs) {
+  var needle = normalized(token)
+  if (!needle) return ""
+  var dirs = Array.isArray(allowedDirs) ? allowedDirs : []
+  for (var exact = 0; exact < dirs.length; exact++) {
+    var candidate = String(dirs[exact] || "")
+    if (normalized(pathLeaf(candidate)) === needle || normalized(candidate) === needle) return candidate
+  }
+  for (var prefix = 0; prefix < dirs.length; prefix++) {
+    var value = String(dirs[prefix] || "")
+    if (normalized(pathLeaf(value)).indexOf(needle) === 0) return value
+  }
+  return ""
+}
+
+// Client-side filter for the "!" history browser, reusing the same
+// substring-match building blocks as rank() so it behaves consistently with
+// every other list in this panel.
+function filterConversations(conversations, query) {
+  var list = Array.isArray(conversations) ? conversations : []
+  var needle = normalized(query)
+  if (!needle) {
+    return list.slice().sort(function(a, b) {
+      return Number(b.updatedAt || 0) - Number(a.updatedAt || 0)
+    })
+  }
+  var scored = []
+  for (var index = 0; index < list.length; index++) {
+    var entry = list[index]
+    var score = substringScore(normalized(entry.title), needle)
+    if (score >= 0) scored.push({ entry: entry, score: score })
+  }
+  scored.sort(function(a, b) {
+    if (a.score !== b.score) return b.score - a.score
+    return Number(b.entry.updatedAt || 0) - Number(a.entry.updatedAt || 0)
+  })
+  return scored.map(function(row) { return row.entry })
+}
+
+function normalizeAllowedDirs(value) {
+  if (!Array.isArray(value) && (!value || typeof value === "string" || typeof value.length !== "number"))
+    return []
+  var sourceLength = Number(value.length)
+  if (!isFinite(sourceLength) || sourceLength < 0
+      || Math.floor(sourceLength) !== sourceLength || sourceLength > 256) return []
+  var seen = {}
+  var normalizedDirs = []
+  for (var index = 0; index < sourceLength; index++) {
+    var raw = value[index]
+    if (typeof raw !== "string") continue
+    var trimmed = raw.trim().replace(/\/+$/, "")
+    if (!trimmed || trimmed.charAt(0) !== "/" || seen[trimmed]) continue
+    seen[trimmed] = true
+    normalizedDirs.push(trimmed)
+  }
+  return normalizedDirs
+}
+
 function mergeProviderItems(providerItems) {
   var out = []
   var seen = {}

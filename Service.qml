@@ -311,5 +311,293 @@ Item {
       if (helperReady) helper.write(JSON.stringify({ version: 1, id: "destruction", type: "shutdown" }) + "\n")
       helper.running = false
     }
+    if (agentHelper.running) {
+      agentIntentionalStop = true
+      if (agentHelperReady)
+        agentHelper.write(JSON.stringify({ version: 1, id: "destruction", type: "shutdown" }) + "\n")
+      agentHelper.running = false
+    }
+  }
+
+  // --- Agent subsystem (opt-in, second process) ----------------------------
+  // A second, fully independent helper and lease, deliberately not sharing
+  // state or a process with the discovery helper above: an agent run is
+  // long-running, streamed, cancellable, and networked, none of which apply
+  // to the sub-second local scans above it. See docs/agent.md. Nothing here
+  // starts unless a bar instance opens agent mode (see Everything.qml's
+  // agentModeOpen), which itself requires the user to have opted in.
+
+  property var agentCapabilities: ({})
+  property var agentLeases: ({})
+  property int agentLeaseCount: 0
+  property bool agentHelperReady: false
+  property bool agentIntentionalStop: false
+  property int agentCrashCount: 0
+  property int agentRequestSerial: 0
+  property var agentRequestQueue: []
+  // Keyed by requestId so concurrent runs (e.g. from more than one monitor)
+  // do not clobber each other's streamed turns.
+  property var agentTurnsByRequest: ({})
+  property var agentFinalByRequest: ({})
+  property var agentConversations: []
+  // Keyed by conversationId. Only one Get is expected in flight at a time in
+  // practice (a single history browser), so this stays a flat map rather
+  // than also being keyed by requestId.
+  property var agentConversationTurns: ({})
+
+  readonly property string agentHelperPath: sourceDir
+    ? sourceDir + "/helper/everything_agent_helper.py" : ""
+
+  function agentNextRequestId(prefix) {
+    agentRequestSerial += 1
+    return "agent-" + String(prefix || "request") + "-" + agentRequestSerial
+  }
+
+  function agentAcquire(ownerKey) {
+    var key = String(ownerKey || "panel")
+    if (agentLeases[key] === true) return
+    var next = {}
+    for (var existing in agentLeases) next[existing] = agentLeases[existing]
+    next[key] = true
+    agentLeases = next
+    agentLeaseCount = Object.keys(next).length
+    agentEnsureHelper()
+  }
+
+  function agentRelease(ownerKey) {
+    var key = String(ownerKey || "panel")
+    if (agentLeases[key] !== true) return
+    var next = {}
+    for (var existing in agentLeases) if (existing !== key) next[existing] = agentLeases[existing]
+    agentLeases = next
+    agentLeaseCount = Object.keys(next).length
+    agentMaybeStopTimer.restart()
+  }
+
+  function agentEnsureHelper() {
+    if (agentHelper.running || !agentHelperPath) return
+    agentIntentionalStop = false
+    agentHelper.command = ["python3", agentHelperPath, "--json-lines"]
+    agentHelper.running = true
+  }
+
+  function agentStopHelper() {
+    if (!agentHelper.running) return
+    agentIntentionalStop = true
+    if (agentHelperReady) {
+      agentHelper.write(JSON.stringify({
+        version: 1, id: agentNextRequestId("shutdown"), type: "shutdown"
+      }) + "\n")
+      agentForceStopTimer.restart()
+    } else {
+      agentHelper.running = false
+    }
+  }
+
+  function agentMaybeStop() {
+    if (agentLeaseCount === 0) agentStopHelper()
+  }
+
+  function agentSendRequest(request) {
+    agentEnsureHelper()
+    if (!agentHelperReady || !agentHelper.running) {
+      var next = agentRequestQueue.slice()
+      next.push(request)
+      agentRequestQueue = next
+      return request.id
+    }
+    agentHelper.write(JSON.stringify(request) + "\n")
+    return request.id
+  }
+
+  function agentFlushQueue() {
+    if (!agentHelperReady || !agentHelper.running) return
+    var queued = agentRequestQueue
+    agentRequestQueue = []
+    for (var i = 0; i < queued.length; i++) agentHelper.write(JSON.stringify(queued[i]) + "\n")
+  }
+
+  function agentRun(options) {
+    var opts = options || {}
+    var requestId = agentNextRequestId("run")
+    var turnsNext = {}
+    for (var tkey in agentTurnsByRequest) turnsNext[tkey] = agentTurnsByRequest[tkey]
+    turnsNext[requestId] = []
+    agentTurnsByRequest = turnsNext
+    var finalNext = {}
+    for (var fkey in agentFinalByRequest) if (fkey !== requestId) finalNext[fkey] = agentFinalByRequest[fkey]
+    agentFinalByRequest = finalNext
+    agentSendRequest({
+      version: 1,
+      id: requestId,
+      type: "agentRun",
+      agent: String(opts.agent || ""),
+      mode: String(opts.mode || "run"),
+      prompt: String(opts.prompt || ""),
+      allowedDirs: Array.isArray(opts.allowedDirs) ? opts.allowedDirs : [],
+      resumeSessionId: String(opts.resumeSessionId || ""),
+      conversationId: String(opts.conversationId || "")
+    })
+    return requestId
+  }
+
+  function agentCancel(requestId) {
+    if (!requestId) return
+    agentSendRequest({
+      version: 1, id: agentNextRequestId("cancel"), type: "agentCancel", requestId: String(requestId)
+    })
+  }
+
+  function agentRequestConversationList() {
+    agentSendRequest({ version: 1, id: agentNextRequestId("list"), type: "agentConversationList" })
+  }
+
+  function agentRequestConversationGet(conversationId) {
+    if (!conversationId) return
+    agentSendRequest({
+      version: 1, id: agentNextRequestId("get"), type: "agentConversationGet",
+      conversationId: String(conversationId)
+    })
+  }
+
+  function agentRequestConversationDelete(conversationId) {
+    if (!conversationId) return
+    agentSendRequest({
+      version: 1, id: agentNextRequestId("delete"), type: "agentConversationDelete",
+      conversationId: String(conversationId)
+    })
+  }
+
+  function agentHandleMessage(line) {
+    var message
+    try {
+      message = JSON.parse(String(line || ""))
+    } catch (error) {
+      return
+    }
+    if (!message || message.version !== 1 || !message.type) return
+
+    if (message.type === "ready") {
+      agentHelperReady = true
+      agentCapabilities = (message.capabilities && message.capabilities.agents) || {}
+      agentFlushQueue()
+      return
+    }
+
+    if (message.type === "agentTurn") {
+      var requestId = String(message.requestId || "")
+      if (!requestId) return
+      if (message.turn) {
+        var turnsUpdate = {}
+        for (var tkey2 in agentTurnsByRequest) turnsUpdate[tkey2] = agentTurnsByRequest[tkey2]
+        var existingTurns = Array.isArray(turnsUpdate[requestId]) ? turnsUpdate[requestId] : []
+        turnsUpdate[requestId] = existingTurns.concat([message.turn])
+        agentTurnsByRequest = turnsUpdate
+      }
+      if (message.final === true) {
+        var finalUpdate = {}
+        for (var fkey2 in agentFinalByRequest) finalUpdate[fkey2] = agentFinalByRequest[fkey2]
+        finalUpdate[requestId] = {
+          ok: message.ok === true,
+          message: String(message.message || ""),
+          cancelled: message.cancelled === true,
+          conversationId: String(message.conversationId || "")
+        }
+        agentFinalByRequest = finalUpdate
+      }
+      return
+    }
+
+    if (message.type === "agentRunFailed") {
+      var failedId = String(message.requestId || "")
+      if (!failedId) return
+      var failedUpdate = {}
+      for (var fkey3 in agentFinalByRequest) failedUpdate[fkey3] = agentFinalByRequest[fkey3]
+      failedUpdate[failedId] = {
+        ok: false,
+        message: String(message.message || "That agent command failed"),
+        cancelled: false,
+        conversationId: String(message.conversationId || "")
+      }
+      agentFinalByRequest = failedUpdate
+      return
+    }
+
+    if (message.type === "agentConversationList") {
+      agentConversations = Array.isArray(message.conversations) ? message.conversations : []
+      return
+    }
+
+    if (message.type === "agentConversationGet") {
+      var gotId = String(message.conversationId || "")
+      if (!gotId) return
+      var getUpdate = {}
+      for (var gkey in agentConversationTurns) getUpdate[gkey] = agentConversationTurns[gkey]
+      getUpdate[gotId] = Array.isArray(message.turns) ? message.turns : []
+      agentConversationTurns = getUpdate
+      return
+    }
+
+    if (message.type === "agentConversationDelete") {
+      var deletedId = String(message.conversationId || "")
+      if (deletedId && message.ok === true) {
+        agentConversations = agentConversations.filter(function(entry) {
+          return entry.id !== deletedId
+        })
+      }
+      return
+    }
+    // "error" is protocol-level and nonfatal by convention (malformed
+    // request, unknown conversation id); nothing currently needs to render
+    // it distinctly from being quietly ignored.
+  }
+
+  Process {
+    id: agentHelper
+    stdinEnabled: true
+
+    stdout: SplitParser {
+      onRead: function(line) { root.agentHandleMessage(line) }
+    }
+
+    stderr: SplitParser {
+      onRead: function(_line) { /* diagnostic only; agent failures are protocol messages */ }
+    }
+
+    onExited: function(exitCode, _exitStatus) {
+      agentForceStopTimer.stop()
+      root.agentHelperReady = false
+      if (root.agentIntentionalStop) {
+        root.agentIntentionalStop = false
+        root.agentRequestQueue = []
+        return
+      }
+      root.agentRequestQueue = []
+      if (root.agentLeaseCount > 0) {
+        root.agentCrashCount += 1
+        if (root.agentCrashCount <= 3) agentRestartTimer.restart()
+      }
+    }
+  }
+
+  Timer {
+    id: agentMaybeStopTimer
+    interval: 175
+    repeat: false
+    onTriggered: root.agentMaybeStop()
+  }
+
+  Timer {
+    id: agentForceStopTimer
+    interval: 1000
+    repeat: false
+    onTriggered: if (agentHelper.running) agentHelper.running = false
+  }
+
+  Timer {
+    id: agentRestartTimer
+    interval: 750
+    repeat: false
+    onTriggered: root.agentEnsureHelper()
   }
 }

@@ -36,6 +36,13 @@ The suite performs:
   ordering;
 - argv injection rejection, command timeout/kill behavior, JSON-lines request
   correlation, malformed-request recovery, and stale-token rejection;
+- the opt-in agent subsystem's own suite, run in the same discovery pass:
+  adapter argv shape and the never-a-bypass-flag guarantee, streaming command
+  execution (line ordering, idle/overall timeout, cancellation, cwd), the
+  transcript store's round trip/permissions/retention/truncation, and a real
+  subprocess protocol harness against a fake in-process adapter — see
+  [AI agent commands](agent.md#tests) for the full breakdown, kept there
+  rather than duplicated here since it is a separate boundary;
 - partial provider streaming, provider failure isolation, stale-row removal,
   and scan cancellation propagation;
 - AT-SPI state restoration without screen-reader writes, browser-family

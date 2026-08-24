@@ -457,14 +457,14 @@ const barButtonHandler = qml.slice(qml.indexOf("BarIconButton {"),
 assert.match(barButtonHandler, /useActiveColor:\s*false/,
   "opening the panel does not recolor its bar icon")
 assert.doesNotMatch(searchHandler, /Key_Backspace|Key_Delete/, "search owns editing keys")
-assert.match(searchHandler, /placeholderText:\s*"Search everything…"/,
-  "the search placeholder uses the requested copy")
+assert.match(searchHandler, /:\s*"Search everything…"/,
+  "the search placeholder uses the requested copy in results mode")
 assert.match(qml,
-  /focusTarget:\s*root\.popupMode === root\.groupsMode \? groupList : searchField/,
-  "search remains the results focus target while the checklist targets its list")
+  /focusTarget:\s*root\.popupMode === root\.groupsMode \? groupList\s*\n\s*:\s*root\.popupMode === root\.foldersMode \? newFolderField : searchField/,
+  "search remains the results\/agent focus target while the checklist and folders panel target their own controls")
 assert.match(qml,
-  /PanelKeyCatcher\s*\{[\s\S]*blocked:\s*root\.popupMode === root\.resultsMode && searchField\.activeFocus/,
-  "the standard shell key catcher yields only while result search is being edited")
+  /PanelKeyCatcher\s*\{[\s\S]*blocked:\s*searchField\.activeFocus && \(root\.popupMode === root\.resultsMode[\s\S]*root\.popupMode === root\.agentMode[\s\S]*root\.popupMode === root\.agentHistoryMode\)/,
+  "the standard shell key catcher yields only while a search-field-bearing mode is being edited")
 assert.match(qml,
   /onMoveRequested:[\s\S]*groupsMode[\s\S]*moveGroupChecklist\(dy\)[\s\S]*moveSelection\(dy\)[\s\S]*dx < 0[\s\S]*collapseCurrentGroup\(\)[\s\S]*dx > 0[\s\S]*expandCurrentGroup\(\)/,
   "the shell's vertical directions move either list while result horizontals fold groups")
@@ -622,5 +622,102 @@ assert.doesNotMatch(serviceQml, /statusMessage|activeScanQuiet/,
   "the service carries no dead panel-message state")
 assert.doesNotMatch(serviceQml, /function refresh\s*\(/,
   "the service has no unused manual refresh entry point")
+
+// --- Agent commands (!/@) ---------------------------------------------------
+
+{
+  // parseAgentCommand runs inside the vm sandbox, so its object results
+  // belong to a different realm than plain literals in this file — a raw
+  // assert.deepEqual would spuriously fail on prototype identity alone.
+  // Round-tripping through JSON compares own enumerable data only.
+  const parse = (text) => JSON.parse(JSON.stringify(sandbox.parseAgentCommand(text)))
+  assert.equal(sandbox.parseAgentCommand("search text"), null, "text with no leading ! is unaffected")
+  assert.equal(sandbox.parseAgentCommand(""), null)
+  assert.equal(sandbox.parseAgentCommand(null), null)
+  assert.deepEqual(parse("!"), { type: "history" }, "a bare ! opens the history browser")
+  assert.deepEqual(parse("! "), { type: "run", mode: "run", attachments: [], prompt: "" },
+    "! followed by whitespace is composing, not history — lets code re-enter compose mode " +
+    "after a submit or when continuing a past conversation without bouncing back to history")
+  assert.deepEqual(parse("!fix the bug"),
+    { type: "run", mode: "run", attachments: [], prompt: "fix the bug" })
+  assert.deepEqual(parse("!ask what does this do"),
+    { type: "run", mode: "ask", attachments: [], prompt: "what does this do" })
+  assert.deepEqual(parse("!plan add a test"),
+    { type: "run", mode: "plan", attachments: [], prompt: "add a test" })
+  assert.deepEqual(parse("!plan"), { type: "run", mode: "plan", attachments: [], prompt: "" },
+    "a mode keyword alone with no prompt yet is still composing, not history")
+  assert.deepEqual(parse("!askfoo"), { type: "run", mode: "run", attachments: [], prompt: "askfoo" },
+    "ask/plan only count as the mode keyword when followed by whitespace or end of string")
+  assert.deepEqual(parse("!@src/ summarize this folder"),
+    { type: "run", mode: "run", attachments: ["src/"], prompt: "summarize this folder" })
+  assert.deepEqual(parse("!ask @a @b compare these"),
+    { type: "run", mode: "ask", attachments: ["a", "b"], prompt: "compare these" },
+    "multiple leading @attachments are collected before the prompt")
+  assert.deepEqual(parse("!look at a@b.com"),
+    { type: "run", mode: "run", attachments: [], prompt: "look at a@b.com" },
+    "an @ that isn't a leading token is left as literal prompt text")
+}
+
+{
+  const resolve = sandbox.resolveAttachment
+  const dirs = ["/home/user/Work/omarchy-everything", "/home/user/notes"]
+  assert.equal(resolve("omarchy-everything", dirs), dirs[0], "exact leaf match")
+  assert.equal(resolve("notes", dirs), dirs[1])
+  assert.equal(resolve("/home/user/notes", dirs), dirs[1], "exact full-path match")
+  assert.equal(resolve("omar", dirs), dirs[0], "prefix-of-leaf match")
+  assert.equal(resolve("nope", dirs), "", "no match resolves to empty, never a guess")
+  assert.equal(resolve("", dirs), "")
+  assert.equal(resolve("x", []), "")
+}
+
+{
+  // Array.from re-materializes the sandbox's array in this realm, avoiding
+  // the same cross-realm prototype pitfall as the object case above (see
+  // the existing normalizeDisabledKinds tests near the top of this file,
+  // which use the identical wrapping for the identical reason).
+  const normalizeAllowedDirs = (value) => Array.from(sandbox.normalizeAllowedDirs(value))
+  assert.deepEqual(normalizeAllowedDirs(undefined), [])
+  assert.deepEqual(normalizeAllowedDirs(null), [])
+  assert.deepEqual(normalizeAllowedDirs("relative"), [], "a scalar string is not a valid array")
+  assert.deepEqual(normalizeAllowedDirs(["relative/path", "/ok"]), ["/ok"],
+    "relative paths are dropped; only absolute paths are accepted")
+  assert.deepEqual(normalizeAllowedDirs(["/a/", "/a", "/b"]), ["/a", "/b"],
+    "trailing slashes are normalized and duplicates are removed")
+  assert.deepEqual(normalizeAllowedDirs([1, null, "/ok"]), ["/ok"], "non-string entries are dropped")
+}
+
+{
+  const filterConversations = sandbox.filterConversations
+  const conversations = [
+    { id: "1", title: "Fix the login bug", updatedAt: 100 },
+    { id: "2", title: "Summarize this repo", updatedAt: 300 },
+    { id: "3", title: "Add tests", updatedAt: 200 },
+  ]
+  assert.deepEqual(
+    Array.from(filterConversations(conversations, ""), c => c.id), ["2", "3", "1"],
+    "with no query, conversations are recent-first")
+  assert.deepEqual(
+    Array.from(filterConversations(conversations, "bug"), c => c.id), ["1"])
+  assert.equal(filterConversations(conversations, "nonexistent").length, 0)
+  assert.equal(filterConversations([], "anything").length, 0)
+}
+
+assert.match(qml, /onTextChanged:\s*root\.handleSearchTextChanged\(\)/,
+  "the search field's live text drives agent-command detection, not just re-ranking")
+assert.match(qml,
+  /function handleSearchTextChanged[\s\S]*if \(!agentEnabled\)[\s\S]*popupMode = resultsMode[\s\S]*scheduleRankedItems\(\)/,
+  "agent commands are entirely inert until the user has opted in")
+assert.match(qml, /readonly property bool agentEnabled:\s*root\.setting\("agentEnabled", false\) === true/,
+  "the agent subsystem defaults to disabled")
+assert.match(qml,
+  /function submitAgentCommand[\s\S]*dirs\.length === 0[\s\S]*agentComposeError =/,
+  "run\/plan submission refuses to proceed without a configured allowed folder")
+
+assert.match(serviceQml, /Process\s*\{\s*\n\s*id:\s*agentHelper/,
+  "the agent subsystem runs its own second helper process")
+assert.match(serviceQml, /function agentRun\(options\)/, "agent runs are requested through one function")
+assert.match(serviceQml, /function agentCancel\(requestId\)/)
+assert.match(serviceQml, /agentHelper\.command = \["python3", agentHelperPath, "--json-lines"\]/,
+  "the agent helper is launched exactly like the discovery helper: argv array, no shell")
 
 console.log("model.test.js: all tests passed")

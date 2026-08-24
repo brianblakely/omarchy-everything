@@ -1,11 +1,21 @@
 # Security and runtime access
 
-Everything is local-only. Runtime code performs no HTTP, DNS, telemetry,
-update, or other network request. The plugin has no install hook, privileged
-operation, `sudo`, browser extension, native-messaging host, persistent daemon,
-or background worker after its last service lease closes. Installation may use
-Omarchy's normal Git-based plugin manager; that fetch is not performed by the
-plugin.
+This document covers the discovery boundary (search, ranking, activation).
+Everything's discovery code is local-only: it performs no HTTP, DNS,
+telemetry, update, or other network request, has no install hook, privileged
+operation, `sudo`, browser extension, native-messaging host, persistent
+daemon, or background worker after its last service lease closes.
+Installation may use Omarchy's normal Git-based plugin manager; that fetch is
+not performed by the plugin.
+
+The one documented exception to all of the above is the opt-in AI agent
+subsystem (`!`/`@` commands) — off by default, running as a second and fully
+separate process from everything described in this file, and covered
+entirely by its own document: [AI agent commands](agent.md), including its
+own command allow-list, its own on-disk transcript store, and its own
+network access (each supported agent CLI's own API calls). Nothing below
+this point applies to it, and nothing in the agent subsystem loosens any
+guarantee below for the discovery helper itself.
 
 All subprocesses are created from argv arrays through
 `asyncio.create_subprocess_exec`, Quickshell `Process.command`, or
@@ -15,7 +25,12 @@ timeouts. External provider failure is nonfatal.
 
 ## Commands
 
-The helper may execute only these command families:
+The discovery helper (`helper/everything_helper.py`) may execute only these
+command families. The separate, opt-in agent helper
+(`helper/everything_agent_helper.py`) has its own, independent allow-list —
+each supported agent CLI, invoked with a fixed argv shape per mode — kept
+entirely in [AI agent commands](agent.md#supported-agents) rather than mixed
+into this list, since it is a different process with different invariants.
 
 - `hyprctl -j clients` and `hyprctl -j activewindow` for managed-client state.
 - `hyprctl dispatch <Lua expression>` for exact-address `hl.dsp.focus` and the
@@ -168,10 +183,17 @@ ordinal, and is rebuilt before activation.
 
 ## Persistence
 
-There is no runtime database or cache file. Provider snapshots, opaque-token
-secrets, helper warnings, monitor leases, Ghostty scan cache, and hidden IDs
-exist only in memory. Plugin or shell reload resets them. The sole persistent
-Everything-owned preference is the normalized `disabledKinds` string array in
-the widget's existing `shell.json` entry. QML writes it through the shell's
-`updateEntryInline` API; it contains only supported public kind identifiers and
-never discovered thing data, native identities, titles, paths, or tokens.
+There is no discovery-owned runtime database or cache file. Provider
+snapshots, opaque-token secrets, helper warnings, monitor leases, Ghostty scan
+cache, and hidden IDs exist only in memory. Plugin or shell reload resets
+them. The discovery-owned persistent preferences are the normalized
+`disabledKinds` string array, plus the opt-in agent subsystem's `agentEnabled`
+boolean and `agentAllowedDirs` string array, all in the widget's existing
+`shell.json` entry. QML writes them through the shell's `updateEntryInline`
+API; none of the three contain discovered thing data, native identities,
+titles, paths (beyond user-configured allowed folders), or tokens.
+
+The agent subsystem additionally keeps its own real on-disk transcript store,
+entirely outside `shell.json` and entirely outside this discovery boundary —
+see [AI agent commands](agent.md#transcript-cache) for its location, format,
+retention, and the exact fields it does and does not store.

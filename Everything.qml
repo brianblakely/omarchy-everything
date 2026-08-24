@@ -32,7 +32,24 @@ Panel {
   readonly property int groupChecklistRowHeight: Style.space(36)
   readonly property string resultsMode: "results"
   readonly property string groupsMode: "groups"
+  // Agent commands (!/@) are a second, opt-in subsystem layered on the same
+  // search field and panel — see docs/agent.md. Nothing under agentEnabled
+  // runs unless the user has both enabled it and configured a folder.
+  readonly property string agentMode: "agent"
+  readonly property string agentHistoryMode: "agentHistory"
+  readonly property string foldersMode: "folders"
   readonly property bool resultsModeOpen: root.opened && popupMode === resultsMode
+  readonly property bool agentModeOpen: root.opened
+    && (popupMode === agentMode || popupMode === agentHistoryMode)
+  readonly property bool agentEnabled: root.setting("agentEnabled", false) === true
+  readonly property var agentAllowedDirs: Model.normalizeAllowedDirs(
+    root.setting("agentAllowedDirs", []))
+  property string activeConversationId: ""
+  property string activeAgentRequestId: ""
+  property var agentSessionTurns: []
+  property int agentMirroredTurnCount: 0
+  property bool agentSubmitting: false
+  property string agentComposeError: ""
   property var rankedItems: []
   property var collapsedKinds: ({})
   property string popupMode: resultsMode
@@ -98,6 +115,41 @@ Panel {
 
   function toggleKindVisibility(kind) {
     setKindEnabled(kind, kindDisabled(kind))
+  }
+
+  function persistAgentEnabled(value) {
+    var wanted = value === true
+    if (agentEnabled === wanted) return
+    var entry = { id: root.moduleName }
+    for (var key in root.settings) if (key !== "id") entry[key] = root.settings[key]
+    entry.agentEnabled = wanted
+    root.settings = entry
+    if (root.bar && root.bar.shell
+        && typeof root.bar.shell.updateEntryInline === "function")
+      root.bar.shell.updateEntryInline(root.moduleName, entry)
+  }
+
+  function persistAgentAllowedDirs(value) {
+    var nextDirs = Model.normalizeAllowedDirs(value)
+    if (Model.sameStringList(agentAllowedDirs, nextDirs)) return
+    var entry = { id: root.moduleName }
+    for (var key in root.settings) if (key !== "id") entry[key] = root.settings[key]
+    entry.agentAllowedDirs = nextDirs
+    root.settings = entry
+    if (root.bar && root.bar.shell
+        && typeof root.bar.shell.updateEntryInline === "function")
+      root.bar.shell.updateEntryInline(root.moduleName, entry)
+  }
+
+  function addAgentAllowedDir(path) {
+    var value = String(path || "").trim().replace(/\/+$/, "")
+    if (!value || value.charAt(0) !== "/" || agentAllowedDirs.indexOf(value) >= 0) return
+    persistAgentAllowedDirs(agentAllowedDirs.concat([value]))
+  }
+
+  function removeAgentAllowedDir(path) {
+    var value = String(path || "")
+    persistAgentAllowedDirs(agentAllowedDirs.filter(function(entry) { return entry !== value }))
   }
 
   function resetGroupChecklist() {
@@ -304,6 +356,202 @@ Panel {
     } else {
       root.close()
     }
+  }
+
+  // --- Agent commands (!/@) -------------------------------------------------
+
+  function handleSearchTextChanged() {
+    if (!agentEnabled) {
+      if (popupMode === agentMode || popupMode === agentHistoryMode) popupMode = resultsMode
+      scheduleRankedItems()
+      return
+    }
+    var command = Model.parseAgentCommand(searchField.text)
+    if (!command) {
+      if (popupMode === agentMode || popupMode === agentHistoryMode) popupMode = resultsMode
+      scheduleRankedItems()
+      return
+    }
+    if (command.type === "history") {
+      if (popupMode !== agentHistoryMode) enterAgentHistoryMode()
+      return
+    }
+    if (popupMode !== agentMode) enterAgentComposeMode()
+    agentComposeError = ""
+  }
+
+  function enterAgentHistoryMode() {
+    popupMode = agentHistoryMode
+    if (everythingService) everythingService.agentRequestConversationList()
+    historyList.currentIndex = historyList.count > 0 ? 0 : -1
+    Qt.callLater(function() {
+      if (root.opened && root.popupMode === root.agentHistoryMode) searchField.forceActiveFocus()
+    })
+  }
+
+  function enterAgentComposeMode() {
+    popupMode = agentMode
+    Qt.callLater(function() {
+      if (root.opened && root.popupMode === root.agentMode) searchField.forceActiveFocus()
+    })
+  }
+
+  // Resets the panel back to a bare "!" (the history browser) without fully
+  // closing, so leaving a conversation mid-compose is one Escape, not a
+  // full close-and-reopen.
+  function backToAgentHistory() {
+    activeConversationId = ""
+    activeAgentRequestId = ""
+    agentSessionTurns = []
+    agentMirroredTurnCount = 0
+    agentComposeError = ""
+    searchField.text = "!"
+    focusSearch()
+  }
+
+  function handleAgentEscape() {
+    if (popupMode === agentHistoryMode) {
+      searchField.text = ""
+      focusSearch()
+      return
+    }
+    if (agentSessionTurns.length > 0 || activeConversationId || agentSubmitting) {
+      backToAgentHistory()
+      return
+    }
+    searchField.text = ""
+    focusSearch()
+  }
+
+  function submitAgentCommand() {
+    if (!everythingService || agentSubmitting) return
+    var command = Model.parseAgentCommand(searchField.text)
+    if (!command || command.type !== "run") return
+    var prompt = command.prompt.trim()
+    if (!prompt) return
+
+    var dirs = []
+    for (var i = 0; i < command.attachments.length; i++) {
+      var resolved = Model.resolveAttachment(command.attachments[i], agentAllowedDirs)
+      if (resolved && dirs.indexOf(resolved) < 0) dirs.push(resolved)
+    }
+    if (dirs.length === 0) dirs = agentAllowedDirs.slice()
+    if ((command.mode === "plan" || command.mode === "run") && dirs.length === 0) {
+      agentComposeError = "Add an allowed folder first (right-click → AI agent folders)"
+      return
+    }
+
+    agentSessionTurns = agentSessionTurns.concat([
+      { role: "user", text: prompt, at: Date.now() / 1000 }
+    ])
+    agentMirroredTurnCount = 0
+    agentSubmitting = true
+    agentComposeError = ""
+    activeAgentRequestId = everythingService.agentRun({
+      mode: command.mode,
+      prompt: prompt,
+      allowedDirs: dirs,
+      conversationId: activeConversationId
+    })
+    searchField.text = "! "
+    searchField.cursorPosition = searchField.text.length
+  }
+
+  function cancelActiveAgentRun() {
+    if (!everythingService || !activeAgentRequestId || !agentSubmitting) return
+    everythingService.agentCancel(activeAgentRequestId)
+  }
+
+  function mirrorAgentTurns() {
+    if (!activeAgentRequestId || !everythingService) return
+    var turns = everythingService.agentTurnsByRequest[activeAgentRequestId]
+    if (!Array.isArray(turns) || turns.length <= agentMirroredTurnCount) return
+    agentSessionTurns = agentSessionTurns.concat(turns.slice(agentMirroredTurnCount))
+    agentMirroredTurnCount = turns.length
+  }
+
+  function handleAgentFinal() {
+    if (!activeAgentRequestId || !everythingService) return
+    var final = everythingService.agentFinalByRequest[activeAgentRequestId]
+    if (!final) return
+    agentSubmitting = false
+    if (final.conversationId) activeConversationId = final.conversationId
+    if (!final.ok) {
+      var message = final.cancelled ? "Cancelled" : (final.message || "That agent command failed")
+      agentSessionTurns = agentSessionTurns.concat([
+        { role: "system", text: message, at: Date.now() / 1000 }
+      ])
+    }
+  }
+
+  function openAgentConversation(conversationId) {
+    if (!everythingService || !conversationId) return
+    activeConversationId = conversationId
+    activeAgentRequestId = ""
+    agentSessionTurns = []
+    agentMirroredTurnCount = 0
+    agentComposeError = ""
+    everythingService.agentRequestConversationGet(conversationId)
+    popupMode = agentMode
+    searchField.text = "! "
+    searchField.cursorPosition = searchField.text.length
+  }
+
+  function handleAgentConversationLoaded() {
+    if (!activeConversationId || !everythingService) return
+    var turns = everythingService.agentConversationTurns[activeConversationId]
+    if (Array.isArray(turns)) {
+      agentSessionTurns = turns
+      agentMirroredTurnCount = 0
+    }
+  }
+
+  function agentHistoryEntries() {
+    return Model.filterConversations(
+      everythingService ? everythingService.agentConversations : [], "")
+  }
+
+  function focusAgentHistory() {
+    if (historyList.count <= 0) return
+    disarmPointer()
+    if (historyList.currentIndex < 0) historyList.currentIndex = 0
+    historyList.forceActiveFocus()
+  }
+
+  function moveAgentHistorySelection(delta) {
+    if (historyList.count <= 0) return
+    var next = Math.max(0, Math.min(historyList.count - 1,
+      (historyList.currentIndex < 0 ? 0 : historyList.currentIndex) + (delta < 0 ? -1 : 1)))
+    historyList.currentIndex = next
+    historyList.forceActiveFocus()
+  }
+
+  function activateAgentHistorySelection() {
+    var entries = agentHistoryEntries()
+    var index = historyList.currentIndex
+    if (index < 0 || index >= entries.length) return
+    openAgentConversation(entries[index].id)
+  }
+
+  function deleteAgentHistorySelection() {
+    var entries = agentHistoryEntries()
+    var index = historyList.currentIndex
+    if (index < 0 || index >= entries.length || !everythingService) return
+    everythingService.agentRequestConversationDelete(entries[index].id)
+  }
+
+  function moveFoldersList(delta) {
+    if (foldersList.count <= 0) return
+    var next = Math.max(0, Math.min(foldersList.count - 1,
+      (foldersList.currentIndex < 0 ? 0 : foldersList.currentIndex) + (delta < 0 ? -1 : 1)))
+    foldersList.currentIndex = next
+    foldersList.forceActiveFocus()
+  }
+
+  function removeFoldersListSelection() {
+    var index = foldersList.currentIndex
+    if (index < 0 || index >= agentAllowedDirs.length) return
+    removeAgentAllowedDir(agentAllowedDirs[index])
   }
 
   function rowTopAt(index) {
@@ -548,6 +796,12 @@ Panel {
       }
     } else {
       popupMode = resultsMode
+      activeConversationId = ""
+      activeAgentRequestId = ""
+      agentSessionTurns = []
+      agentMirroredTurnCount = 0
+      agentSubmitting = false
+      agentComposeError = ""
     }
   }
 
@@ -557,19 +811,32 @@ Panel {
     else everythingService.release(instanceKey)
   }
 
+  onAgentModeOpenChanged: {
+    if (!everythingService) return
+    if (agentModeOpen) everythingService.agentAcquire(instanceKey)
+    else everythingService.agentRelease(instanceKey)
+  }
+
   onEverythingServiceChanged: {
     if (resultsModeOpen && everythingService) everythingService.acquire(instanceKey)
+    if (agentModeOpen && everythingService) everythingService.agentAcquire(instanceKey)
     scheduleRankedItems()
   }
   onDisabledKindsChanged: scheduleRankedItems()
   Component.onCompleted: scheduleRankedItems()
-  Component.onDestruction: if (everythingService) everythingService.release(instanceKey)
+  Component.onDestruction: {
+    if (everythingService) everythingService.release(instanceKey)
+    if (everythingService) everythingService.agentRelease(instanceKey)
+  }
 
   Connections {
     target: root.everythingService
     ignoreUnknownSignals: true
     function onItemsChanged() { root.scheduleRankedItems() }
     function onHiddenIdsChanged() { root.scheduleRankedItems() }
+    function onAgentTurnsByRequestChanged() { root.mirrorAgentTurns() }
+    function onAgentFinalByRequestChanged() { root.handleAgentFinal() }
+    function onAgentConversationTurnsChanged() { root.handleAgentConversationLoaded() }
   }
 
   implicitWidth: button.implicitWidth
@@ -646,7 +913,8 @@ Panel {
     owner: root
     bar: root.bar
     open: root.opened
-    focusTarget: root.popupMode === root.groupsMode ? groupList : searchField
+    focusTarget: root.popupMode === root.groupsMode ? groupList
+      : root.popupMode === root.foldersMode ? newFolderField : searchField
     contentWidth: popup.fittedContentWidth(Style.space(620))
     contentHeight: popup.cappedContentHeight(Style.space(620))
 
@@ -654,25 +922,40 @@ Panel {
       id: keyCatcher
       objectName: "everything-key-catcher"
       anchors.fill: parent
-      blocked: root.popupMode === root.resultsMode && searchField.activeFocus
+      blocked: searchField.activeFocus && (root.popupMode === root.resultsMode
+        || root.popupMode === root.agentMode || root.popupMode === root.agentHistoryMode)
 
       onMoveRequested: function(dx, dy) {
         if (root.popupMode === root.groupsMode) {
           if (dy !== 0) root.moveGroupChecklist(dy)
+        } else if (root.popupMode === root.agentHistoryMode) {
+          if (dy !== 0) root.moveAgentHistorySelection(dy)
+        } else if (root.popupMode === root.foldersMode) {
+          if (dy !== 0) root.moveFoldersList(dy)
+        } else if (root.popupMode === root.agentMode) {
+          // No navigable list; the transcript is a read-only feed.
         } else if (dy !== 0) root.moveSelection(dy)
         else if (dx < 0) root.collapseCurrentGroup()
         else if (dx > 0) root.expandCurrentGroup()
       }
       onActivateRequested: {
         if (root.popupMode === root.groupsMode) root.toggleCurrentGroupVisibility()
+        else if (root.popupMode === root.agentHistoryMode) root.activateAgentHistorySelection()
+        else if (root.popupMode === root.foldersMode || root.popupMode === root.agentMode) return
         else root.activateCurrent()
       }
       onCloseRequested: {
-        if (root.popupMode === root.groupsMode) root.close()
+        if (root.popupMode === root.foldersMode) root.popupMode = root.groupsMode
+        else if (root.popupMode === root.groupsMode) root.close()
+        else if (root.popupMode === root.agentHistoryMode || root.popupMode === root.agentMode)
+          root.handleAgentEscape()
         else root.handleEscape()
       }
-      onDeleteRequested: if (root.popupMode === root.resultsMode)
-        root.hideAt(resultList.currentIndex)
+      onDeleteRequested: {
+        if (root.popupMode === root.resultsMode) root.hideAt(resultList.currentIndex)
+        else if (root.popupMode === root.agentHistoryMode) root.deleteAgentHistorySelection()
+        else if (root.popupMode === root.foldersMode) root.removeFoldersListSelection()
+      }
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(text) {
         if (root.popupMode !== root.resultsMode) return
@@ -686,7 +969,14 @@ Panel {
         anchors.fill: parent
         Accessible.role: Accessible.Pane
         Accessible.name: root.popupMode === root.groupsMode
-          ? "Everything group visibility panel" : "Everything search and switch panel"
+          ? "Everything group visibility panel"
+          : root.popupMode === root.foldersMode
+          ? "Everything agent folder access panel"
+          : root.popupMode === root.agentHistoryMode
+          ? "Everything agent conversation history"
+          : root.popupMode === root.agentMode
+          ? "Everything agent command panel"
+          : "Everything search and switch panel"
 
       TextField {
         id: searchField
@@ -694,22 +984,48 @@ Panel {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        visible: root.popupMode === root.resultsMode
+        visible: root.popupMode === root.resultsMode || root.popupMode === root.agentMode
+          || root.popupMode === root.agentHistoryMode
         enabled: visible
-        placeholderText: "Search everything…"
+        placeholderText: root.popupMode === root.agentMode
+          ? "Ask, plan, or run…" : root.popupMode === root.agentHistoryMode
+          ? "Recent agent conversations" : "Search everything…"
         foreground: root.foreground
         activeFocusOnTab: true
         Accessible.role: Accessible.EditableText
-        Accessible.name: "Search things"
-        Accessible.description: "Type a contiguous title or group-name substring"
+        Accessible.name: root.popupMode === root.resultsMode ? "Search things" : "Agent command"
+        Accessible.description: root.popupMode === root.resultsMode
+          ? "Type a contiguous title or group-name substring"
+          : "Type ! for agent history, !ask or !plan a question, or ! followed by a command"
         Accessible.editable: true
         Accessible.focusable: true
         Accessible.focused: activeFocus
         onActiveFocusChanged: if (activeFocus) root.disarmPointer()
-        onTextChanged: root.scheduleRankedItems()
+        onTextChanged: root.handleSearchTextChanged()
 
         Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) {
+          if (root.popupMode === root.agentMode) {
+            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+              event.accepted = true
+              root.submitAgentCommand()
+            } else if (event.key === Qt.Key_Escape) {
+              event.accepted = true
+              root.handleAgentEscape()
+            }
+            return
+          }
+          if (root.popupMode === root.agentHistoryMode) {
+            if (event.key === Qt.Key_Down || (event.key === Qt.Key_Tab
+                && (event.modifiers & Qt.ShiftModifier) === 0)) {
+              event.accepted = true
+              root.focusAgentHistory()
+            } else if (event.key === Qt.Key_Escape) {
+              event.accepted = true
+              root.handleAgentEscape()
+            }
+            return
+          }
           if (event.key === Qt.Key_Down || (event.key === Qt.Key_Tab
               && (event.modifiers & Qt.ShiftModifier) === 0)) {
             event.accepted = true
@@ -976,11 +1292,38 @@ Panel {
         }
       }
 
+      Text {
+        id: agentFoldersLink
+        objectName: "everything-agent-folders-link"
+        visible: root.popupMode === root.groupsMode && root.agentEnabled
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.margins: Style.space(8)
+        text: "\uf07c  AI agent folders\u2026"
+        color: root.dimForeground
+        font.family: Style.font.family
+        font.pixelSize: Style.font.caption
+
+        Accessible.role: Accessible.Button
+        Accessible.name: "Configure agent-allowed folders"
+        Accessible.onPressAction: root.popupMode = root.foldersMode
+
+        MouseArea {
+          anchors.fill: parent
+          cursorShape: Qt.PointingHandCursor
+          onClicked: root.popupMode = root.foldersMode
+        }
+      }
+
       ListView {
         id: groupList
         objectName: "everything-groups"
-        anchors.fill: parent
+        anchors.top: agentFoldersLink.visible ? agentFoldersLink.bottom : parent.top
         anchors.topMargin: Style.space(4)
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
         anchors.bottomMargin: Style.space(6)
         visible: root.popupMode === root.groupsMode
         enabled: visible
@@ -1086,6 +1429,335 @@ Panel {
             anchors.fill: parent
             cursorShape: Qt.PointingHandCursor
             onClicked: groupRow.activate()
+          }
+        }
+      }
+
+      ListView {
+        id: agentTranscript
+        objectName: "everything-agent-transcript"
+        anchors.top: searchField.bottom
+        anchors.topMargin: Style.space(4)
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: Style.space(6)
+        visible: root.popupMode === root.agentMode
+        enabled: visible
+        clip: true
+        model: root.agentSessionTurns
+        boundsBehavior: Flickable.StopAtBounds
+        onCountChanged: if (count > 0) positionViewAtEnd()
+
+        Accessible.role: Accessible.List
+        Accessible.name: "Agent conversation"
+
+        delegate: Item {
+          id: turnRow
+          required property var modelData
+          required property int index
+          width: agentTranscript.width
+          height: turnText.implicitHeight + roleLabel.implicitHeight + Style.space(14)
+          readonly property color roleColor: turnRow.modelData.role === "user"
+            ? root.foreground : turnRow.modelData.role === "system"
+            ? Color.accent : root.dimForeground
+
+          Accessible.role: Accessible.StaticText
+          Accessible.name: String(turnRow.modelData.role || "") + ": " + String(turnRow.modelData.text || "")
+
+          Text {
+            id: roleLabel
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.margins: Style.space(8)
+            text: turnRow.modelData.role === "user" ? "You"
+              : turnRow.modelData.role === "system" ? "!" : "Agent"
+            color: turnRow.roleColor
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            font.bold: true
+          }
+
+          Text {
+            id: turnText
+            anchors.top: roleLabel.bottom
+            anchors.topMargin: Style.space(2)
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.margins: Style.space(8)
+            text: String(turnRow.modelData.text || "")
+            color: root.foreground
+            wrapMode: Text.Wrap
+            font.family: Style.font.family
+            font.pixelSize: Style.font.body
+          }
+        }
+
+        footer: Item {
+          width: agentTranscript.width
+          height: visible ? Style.space(28) : 0
+          visible: root.agentSubmitting || root.agentComposeError.length > 0
+
+          Text {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.margins: Style.space(8)
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.agentComposeError.length > 0 ? root.agentComposeError : "Working…"
+            color: root.agentComposeError.length > 0 ? Color.accent : root.dimForeground
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.Wrap
+          }
+        }
+      }
+
+      ListView {
+        id: historyList
+        objectName: "everything-agent-history"
+        anchors.top: searchField.bottom
+        anchors.topMargin: Style.space(4)
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: Style.space(6)
+        visible: root.popupMode === root.agentHistoryMode
+        enabled: visible
+        clip: true
+        model: root.agentHistoryEntries()
+        currentIndex: -1
+        activeFocusOnTab: count > 0
+        boundsBehavior: Flickable.StopAtBounds
+        keyNavigationEnabled: false
+        highlightMoveDuration: 80
+        Accessible.role: Accessible.List
+        Accessible.name: "Recent agent conversations"
+        Accessible.description: "Use Up and Down to select, Enter to open, Delete to remove"
+        Accessible.focusable: count > 0
+        Accessible.focused: activeFocus
+
+        Keys.priority: Keys.BeforeItem
+        Keys.onPressed: function(event) {
+          if (event.key === Qt.Key_Up) {
+            event.accepted = true
+            root.moveAgentHistorySelection(-1)
+          } else if (event.key === Qt.Key_Down) {
+            event.accepted = true
+            root.moveAgentHistorySelection(1)
+          } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+            event.accepted = true
+            root.activateAgentHistorySelection()
+          } else if (event.key === Qt.Key_Backspace || event.key === Qt.Key_Delete) {
+            event.accepted = true
+            root.deleteAgentHistorySelection()
+          } else if (event.key === Qt.Key_Escape) {
+            event.accepted = true
+            root.handleAgentEscape()
+          }
+        }
+
+        ScrollBar.vertical: ScrollBar {
+          policy: ScrollBar.AsNeeded
+          leftPadding: Style.space(4)
+          rightPadding: 0
+          palette.mid: Color.accent
+          palette.dark: Color.accent
+        }
+
+        delegate: Item {
+          id: historyRow
+          required property var modelData
+          required property int index
+          width: historyList.width
+          height: root.rowHeight
+          readonly property bool highlighted: (historyList.activeFocus || keyCatcher.activeFocus)
+            && historyList.currentIndex === index
+
+          Accessible.role: Accessible.ListItem
+          Accessible.name: String(historyRow.modelData.title || "New conversation")
+          Accessible.description: String(historyRow.modelData.agent || "")
+            + ", " + String(historyRow.modelData.mode || "")
+          Accessible.selectable: true
+          Accessible.selected: historyRow.highlighted
+          Accessible.focusable: true
+          Accessible.focused: historyRow.highlighted
+          Accessible.onPressAction: {
+            historyList.currentIndex = historyRow.index
+            root.activateAgentHistorySelection()
+          }
+
+          Rectangle {
+            anchors.fill: parent
+            anchors.bottomMargin: Style.space(1)
+            radius: Style.cornerRadius
+            color: historyRow.highlighted
+              ? Style.focusFillFor(root.foreground, Color.accent)
+              : "transparent"
+          }
+
+          Text {
+            anchors.left: parent.left
+            anchors.leftMargin: Style.space(8)
+            anchors.right: parent.right
+            anchors.rightMargin: Style.space(8)
+            anchors.verticalCenter: parent.verticalCenter
+            text: String(historyRow.modelData.title || "New conversation")
+            color: root.foreground
+            font.family: Style.font.family
+            font.pixelSize: Style.font.body
+            elide: Text.ElideRight
+          }
+
+          MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onEntered: historyList.currentIndex = historyRow.index
+            onClicked: {
+              historyList.currentIndex = historyRow.index
+              root.activateAgentHistorySelection()
+            }
+          }
+        }
+      }
+
+      Item {
+        id: foldersPanel
+        objectName: "everything-agent-folders-panel"
+        anchors.fill: parent
+        visible: root.popupMode === root.foldersMode
+        enabled: visible
+
+        Text {
+          id: foldersBackLink
+          anchors.top: parent.top
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.margins: Style.space(8)
+          text: "\uf104  Back"
+          color: root.dimForeground
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+
+          Accessible.role: Accessible.Button
+          Accessible.name: "Back to group visibility"
+          Accessible.onPressAction: root.popupMode = root.groupsMode
+
+          MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.popupMode = root.groupsMode
+          }
+        }
+
+        TextField {
+          id: newFolderField
+          objectName: "everything-new-folder"
+          anchors.top: foldersBackLink.bottom
+          anchors.topMargin: Style.space(4)
+          anchors.left: parent.left
+          anchors.right: parent.right
+          placeholderText: "/absolute/path/to/folder"
+          foreground: root.foreground
+          Accessible.role: Accessible.EditableText
+          Accessible.name: "Add an allowed folder"
+          Accessible.editable: true
+          Keys.onReturnPressed: { root.addAgentAllowedDir(text); text = "" }
+          Keys.onEnterPressed: { root.addAgentAllowedDir(text); text = "" }
+        }
+
+        ListView {
+          id: foldersList
+          objectName: "everything-agent-folders"
+          anchors.top: newFolderField.bottom
+          anchors.topMargin: Style.space(4)
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.bottom: parent.bottom
+          anchors.bottomMargin: Style.space(6)
+          clip: true
+          model: root.agentAllowedDirs
+          currentIndex: root.agentAllowedDirs.length > 0 ? 0 : -1
+          activeFocusOnTab: true
+          boundsBehavior: Flickable.StopAtBounds
+          keyNavigationEnabled: false
+          Accessible.role: Accessible.List
+          Accessible.name: "Agent-allowed folders"
+          Accessible.description: "Folders the agent may read and edit in run and plan mode. Delete removes one."
+          Accessible.focusable: true
+          Accessible.focused: activeFocus
+
+          Keys.priority: Keys.BeforeItem
+          Keys.onPressed: function(event) {
+            if (event.key === Qt.Key_Backspace || event.key === Qt.Key_Delete) {
+              event.accepted = true
+              root.removeFoldersListSelection()
+            }
+          }
+
+          ScrollBar.vertical: ScrollBar {
+            policy: ScrollBar.AsNeeded
+            leftPadding: Style.space(4)
+            rightPadding: 0
+            palette.mid: Color.accent
+            palette.dark: Color.accent
+          }
+
+          delegate: Item {
+            id: folderRow
+            required property string modelData
+            required property int index
+            width: foldersList.width
+            height: root.groupChecklistRowHeight
+            readonly property bool highlighted: foldersList.currentIndex === index
+              && (foldersList.activeFocus || keyCatcher.activeFocus)
+
+            Accessible.role: Accessible.ListItem
+            Accessible.name: folderRow.modelData
+            Accessible.focusable: true
+            Accessible.focused: folderRow.highlighted
+
+            Rectangle {
+              anchors.fill: parent
+              anchors.bottomMargin: Style.space(1)
+              radius: Style.cornerRadius
+              color: folderRow.highlighted
+                ? Style.focusFillFor(root.foreground, Color.accent)
+                : "transparent"
+            }
+
+            Text {
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(8)
+              anchors.right: removeIcon.left
+              anchors.rightMargin: Style.space(8)
+              anchors.verticalCenter: parent.verticalCenter
+              text: folderRow.modelData
+              color: root.foreground
+              font.family: Style.font.family
+              font.pixelSize: Style.font.body
+              elide: Text.ElideMiddle
+            }
+
+            Text {
+              id: removeIcon
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(8)
+              anchors.verticalCenter: parent.verticalCenter
+              text: "\uf1f8"
+              color: root.dimForeground
+              font.family: Style.font.family
+              font.pixelSize: Style.font.body
+            }
+
+            MouseArea {
+              anchors.fill: parent
+              cursorShape: Qt.PointingHandCursor
+              onClicked: {
+                foldersList.currentIndex = folderRow.index
+                root.removeAgentAllowedDir(folderRow.modelData)
+              }
+            }
           }
         }
       }

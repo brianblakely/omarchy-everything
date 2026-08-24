@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from dataclasses import dataclass
-from typing import Mapping, Sequence
+from typing import Awaitable, Callable, Mapping, Sequence
 
 
 class CommandError(RuntimeError):
@@ -51,6 +52,7 @@ class CommandRunner:
         input_text: str | None = None,
         env: Mapping[str, str] | None = None,
         check: bool = False,
+        cwd: str | None = None,
     ) -> CommandResult:
         command = safe_argv(argv)
         stdin = asyncio.subprocess.PIPE if input_text is not None else asyncio.subprocess.DEVNULL
@@ -60,6 +62,7 @@ class CommandRunner:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=dict(env) if env is not None else None,
+            cwd=cwd,
         )
         try:
             stdout, stderr = await asyncio.wait_for(
@@ -77,6 +80,89 @@ class CommandRunner:
             stderr.decode("utf-8", "replace"),
         )
         return result.require_success() if check else result
+
+    async def run_streaming(
+        self,
+        argv: Sequence[object],
+        *,
+        on_line: Callable[[str], "Awaitable[None] | None"],
+        timeout: float | None = None,
+        idle_timeout: float | None = None,
+        env: Mapping[str, str] | None = None,
+        cwd: str | None = None,
+    ) -> CommandResult:
+        """Run a long-lived command, delivering stdout to `on_line` as it arrives.
+
+        Unlike run(), this is for commands whose output can take seconds to
+        minutes to complete (agent CLIs). `timeout` bounds the whole call;
+        `idle_timeout` kills the process if no stdout line arrives for that
+        long. Cancelling the awaiting task (asyncio.Task.cancel()) kills the
+        subprocess promptly instead of leaking it, mirroring the timeout path.
+        Still argv-array-only via safe_argv(); still no shell interpolation.
+        """
+        command = safe_argv(argv)
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=dict(env) if env is not None else None,
+            cwd=cwd,
+        )
+        deadline = None if timeout is None else time.monotonic() + timeout
+        lines: list[str] = []
+
+        async def pump_stderr() -> str:
+            assert process.stderr is not None
+            raw = await process.stderr.read()
+            return raw.decode("utf-8", "replace")
+
+        stderr_task = asyncio.create_task(pump_stderr())
+        try:
+            assert process.stdout is not None
+            while True:
+                remaining = None if deadline is None else deadline - time.monotonic()
+                if remaining is not None and remaining <= 0:
+                    raise CommandTimeout(f"{command[0]} timed out")
+                if idle_timeout is None:
+                    wait_for = remaining
+                elif remaining is None:
+                    wait_for = idle_timeout
+                else:
+                    wait_for = min(idle_timeout, remaining)
+                try:
+                    raw_line = await asyncio.wait_for(process.stdout.readline(), wait_for)
+                except TimeoutError as error:
+                    raise CommandTimeout(f"{command[0]} produced no output in time") from error
+                if not raw_line:
+                    break
+                text = raw_line.decode("utf-8", "replace").rstrip("\n")
+                lines.append(text)
+                result = on_line(text)
+                if result is not None:
+                    await result
+            try:
+                await asyncio.wait_for(process.wait(), timeout=5.0)
+            except TimeoutError:
+                process.kill()
+                await process.wait()
+        except asyncio.CancelledError:
+            process.kill()
+            await process.wait()
+            raise
+        except CommandTimeout:
+            process.kill()
+            await process.wait()
+            raise
+        finally:
+            if not stderr_task.done():
+                stderr_task.cancel()
+        stderr_text = ""
+        try:
+            stderr_text = await stderr_task
+        except asyncio.CancelledError:
+            pass
+        return CommandResult(command, int(process.returncode or 0), "\n".join(lines), stderr_text)
 
     async def spawn_detached(self, argv: Sequence[object], *, env: Mapping[str, str] | None = None) -> int:
         command = safe_argv(argv)
