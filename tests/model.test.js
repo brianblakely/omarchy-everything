@@ -713,6 +713,11 @@ assert.match(qml,
   /function submitAgentCommand[\s\S]*dirs\.length === 0[\s\S]*agentComposeError =/,
   "run\/plan submission refuses to proceed without a configured allowed folder")
 assert.match(qml,
+  /function handleAgentEscape\(\)[\s\S]*backToAgentHistory\(\)[\s\S]*searchField\.text\.length > 1[\s\S]*root\.close\(\)/,
+  "Escape from the agent UI escalates (soften, then soften again, then close) and always eventually closes")
+assert.match(qml, /function backToAgentHistory\(\)[\s\S]*cancelActiveAgentRun\(\)/,
+  "stepping back out of a conversation cancels any run still in flight, not just hides it")
+assert.match(qml,
   /id:\s*turnText[\s\S]*textFormat:\s*turnRow\.modelData\.role === "user" \? Text\.PlainText : Text\.MarkdownText/,
   "agent/system turns render markdown; the user's own literal prompt never gets reinterpreted")
 

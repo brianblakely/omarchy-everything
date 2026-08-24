@@ -400,27 +400,34 @@ Panel {
   // closing, so leaving a conversation mid-compose is one Escape, not a
   // full close-and-reopen.
   function backToAgentHistory() {
+    cancelActiveAgentRun()
     activeConversationId = ""
     activeAgentRequestId = ""
     agentSessionTurns = []
     agentMirroredTurnCount = 0
+    agentSubmitting = false
     agentComposeError = ""
     searchField.text = "!"
     focusSearch()
   }
 
+  // Escape escalates exactly like the results panel's own handleEscape:
+  // each press softens one step (cancel a running command / discard an
+  // unsent draft / step back to history) and the next press after there is
+  // nothing left to soften closes the panel outright — so Escape always
+  // gets you out, however many steps in you are.
   function handleAgentEscape() {
-    if (popupMode === agentHistoryMode) {
-      searchField.text = ""
-      focusSearch()
-      return
-    }
-    if (agentSessionTurns.length > 0 || activeConversationId || agentSubmitting) {
+    if (popupMode === agentMode
+        && (agentSessionTurns.length > 0 || activeConversationId || agentSubmitting)) {
       backToAgentHistory()
       return
     }
-    searchField.text = ""
-    focusSearch()
+    if (searchField.text.length > 1) {
+      searchField.text = "!"
+      focusSearch()
+      return
+    }
+    root.close()
   }
 
   function submitAgentCommand() {
@@ -795,6 +802,10 @@ Panel {
         resetResultsForOpen()
       }
     } else {
+      // Closing the panel stops a running command too — an in-flight agent
+      // run has no listener once its UI is gone, and "close Everything"
+      // should mean everything actually stops, not just the panel hiding.
+      cancelActiveAgentRun()
       popupMode = resultsMode
       activeConversationId = ""
       activeAgentRequestId = ""

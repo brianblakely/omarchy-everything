@@ -26,9 +26,12 @@ below):
   panel). `!@<folder-name> <text>` attaches one of those configured folders
   by name as extra context ahead of the prompt; unrecognized names are
   ignored rather than guessed at.
-- Escape steps back to the history browser rather than fully closing while a
-  conversation is open, matching the panel's existing "first Escape softens,
-  second Escape closes" feel.
+- Escape escalates the same way the results panel's own Escape does: from an
+  open conversation, the first press cancels a run still in flight (if any)
+  and steps back to the history browser; from there, or from an unsent
+  draft, the next press closes the panel outright. Escape always gets you
+  out, however many steps in you are — it never leaves a run silently
+  finishing in the background after the panel is gone.
 - Agent and system turns render as markdown (bold, lists, code spans,
   headings, links) via Qt's built-in `Text.MarkdownText`, not a custom
   renderer — no syntax highlighting inside code blocks, but headings, lists,
