@@ -41,6 +41,11 @@ agent command:
 | `!<task>` | Run it, with edits and tool use confined to your configured folders |
 | `!@<folder> <task>` | Attach one of your configured folders by name as context |
 
+While browsing history, Up/Down move the selection and Enter opens it. While
+viewing a conversation, Up/Down scroll it, Left goes back to the history
+list, and Right jumps to the latest turn — typing stays active throughout,
+so you never need to Tab or click away from the search field first.
+
 It drives your configured default agent (`omarchy default agent`) directly —
 currently Claude Code, Codex, or Gemini CLI. Run/plan modes never bypass that
 agent's own permission prompts; they're scoped to the folders you add instead.

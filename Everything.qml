@@ -518,19 +518,28 @@ Panel {
       everythingService ? everythingService.agentConversations : [], "")
   }
 
-  function focusAgentHistory() {
-    if (historyList.count <= 0) return
-    disarmPointer()
-    if (historyList.currentIndex < 0) historyList.currentIndex = 0
-    historyList.forceActiveFocus()
-  }
-
+  // Arrow keys drive both agent modes directly from the search field —
+  // typing stays active the whole time; nothing ever needs Tab/Down to hand
+  // focus to a list first the way resultsMode does.
   function moveAgentHistorySelection(delta) {
     if (historyList.count <= 0) return
     var next = Math.max(0, Math.min(historyList.count - 1,
       (historyList.currentIndex < 0 ? 0 : historyList.currentIndex) + (delta < 0 ? -1 : 1)))
     historyList.currentIndex = next
-    historyList.forceActiveFocus()
+    historyList.positionViewAtIndex(next, ListView.Contain)
+  }
+
+  function scrollAgentTranscript(direction) {
+    if (agentTranscript.count <= 0) return
+    var step = root.rowHeight * 3
+    var maxY = agentTranscript.originY
+      + Math.max(0, agentTranscript.contentHeight - agentTranscript.height)
+    var wanted = agentTranscript.contentY + (direction < 0 ? -step : step)
+    agentTranscript.contentY = Math.max(agentTranscript.originY, Math.min(maxY, wanted))
+  }
+
+  function jumpAgentTranscriptToEnd() {
+    if (agentTranscript.count > 0) agentTranscript.positionViewAtEnd()
   }
 
   function activateAgentHistorySelection() {
@@ -1016,6 +1025,9 @@ Panel {
 
         Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) {
+          // Both agent modes drive navigation with the arrow keys directly
+          // from this field instead of handing focus to a list first —
+          // typing stays active no matter where you are in the agent UI.
           if (root.popupMode === root.agentMode) {
             if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
               event.accepted = true
@@ -1023,14 +1035,31 @@ Panel {
             } else if (event.key === Qt.Key_Escape) {
               event.accepted = true
               root.handleAgentEscape()
+            } else if (event.key === Qt.Key_Up) {
+              event.accepted = true
+              root.scrollAgentTranscript(-1)
+            } else if (event.key === Qt.Key_Down) {
+              event.accepted = true
+              root.scrollAgentTranscript(1)
+            } else if (event.key === Qt.Key_Left) {
+              event.accepted = true
+              root.backToAgentHistory()
+            } else if (event.key === Qt.Key_Right) {
+              event.accepted = true
+              root.jumpAgentTranscriptToEnd()
             }
             return
           }
           if (root.popupMode === root.agentHistoryMode) {
-            if (event.key === Qt.Key_Down || (event.key === Qt.Key_Tab
-                && (event.modifiers & Qt.ShiftModifier) === 0)) {
+            if (event.key === Qt.Key_Up) {
               event.accepted = true
-              root.focusAgentHistory()
+              root.moveAgentHistorySelection(-1)
+            } else if (event.key === Qt.Key_Down) {
+              event.accepted = true
+              root.moveAgentHistorySelection(1)
+            } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+              event.accepted = true
+              root.activateAgentHistorySelection()
             } else if (event.key === Qt.Key_Escape) {
               event.accepted = true
               root.handleAgentEscape()
@@ -1551,35 +1580,14 @@ Panel {
         clip: true
         model: root.agentHistoryEntries()
         currentIndex: -1
-        activeFocusOnTab: count > 0
+        activeFocusOnTab: false
         boundsBehavior: Flickable.StopAtBounds
         keyNavigationEnabled: false
         highlightMoveDuration: 80
         Accessible.role: Accessible.List
         Accessible.name: "Recent agent conversations"
-        Accessible.description: "Use Up and Down to select, Enter to open, Delete to remove"
-        Accessible.focusable: count > 0
-        Accessible.focused: activeFocus
-
-        Keys.priority: Keys.BeforeItem
-        Keys.onPressed: function(event) {
-          if (event.key === Qt.Key_Up) {
-            event.accepted = true
-            root.moveAgentHistorySelection(-1)
-          } else if (event.key === Qt.Key_Down) {
-            event.accepted = true
-            root.moveAgentHistorySelection(1)
-          } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            event.accepted = true
-            root.activateAgentHistorySelection()
-          } else if (event.key === Qt.Key_Backspace || event.key === Qt.Key_Delete) {
-            event.accepted = true
-            root.deleteAgentHistorySelection()
-          } else if (event.key === Qt.Key_Escape) {
-            event.accepted = true
-            root.handleAgentEscape()
-          }
-        }
+        Accessible.description: "Use Up and Down to select, Enter to open"
+        Accessible.focusable: false
 
         ScrollBar.vertical: ScrollBar {
           policy: ScrollBar.AsNeeded
@@ -1595,7 +1603,7 @@ Panel {
           required property int index
           width: historyList.width
           height: root.rowHeight
-          readonly property bool highlighted: (historyList.activeFocus || keyCatcher.activeFocus)
+          readonly property bool highlighted: root.popupMode === root.agentHistoryMode
             && historyList.currentIndex === index
 
           Accessible.role: Accessible.ListItem
@@ -1623,7 +1631,7 @@ Panel {
           Text {
             anchors.left: parent.left
             anchors.leftMargin: Style.space(8)
-            anchors.right: parent.right
+            anchors.right: historyRowDelete.left
             anchors.rightMargin: Style.space(8)
             anchors.verticalCenter: parent.verticalCenter
             text: String(historyRow.modelData.title || "New conversation")
@@ -1633,8 +1641,38 @@ Panel {
             elide: Text.ElideRight
           }
 
+          Text {
+            id: historyRowDelete
+            objectName: "everything-agent-history-delete-" + historyRow.index
+            anchors.right: parent.right
+            anchors.rightMargin: Style.space(8)
+            anchors.verticalCenter: parent.verticalCenter
+            text: "\uf1f8"
+            color: root.dimForeground
+
+            Accessible.role: Accessible.Button
+            Accessible.name: "Delete this conversation"
+            Accessible.onPressAction: {
+              historyList.currentIndex = historyRow.index
+              root.deleteAgentHistorySelection()
+            }
+
+            MouseArea {
+              anchors.fill: parent
+              anchors.margins: -Style.space(6)
+              cursorShape: Qt.PointingHandCursor
+              onClicked: {
+                historyList.currentIndex = historyRow.index
+                root.deleteAgentHistorySelection()
+              }
+            }
+          }
+
           MouseArea {
-            anchors.fill: parent
+            anchors.left: parent.left
+            anchors.right: historyRowDelete.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onEntered: historyList.currentIndex = historyRow.index

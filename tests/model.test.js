@@ -717,6 +717,15 @@ assert.match(qml,
   "Escape from the agent UI escalates (soften, then soften again, then close) and always eventually closes")
 assert.match(qml, /function backToAgentHistory\(\)[\s\S]*cancelActiveAgentRun\(\)/,
   "stepping back out of a conversation cancels any run still in flight, not just hides it")
+
+assert.match(qml,
+  /root\.popupMode === root\.agentMode[\s\S]*Key_Up[\s\S]*scrollAgentTranscript\(-1\)[\s\S]*Key_Down[\s\S]*scrollAgentTranscript\(1\)[\s\S]*Key_Left[\s\S]*backToAgentHistory\(\)[\s\S]*Key_Right[\s\S]*jumpAgentTranscriptToEnd\(\)/,
+  "viewing a conversation: Up/Down scroll, Left goes back to the list, Right jumps to the end")
+assert.match(qml,
+  /root\.popupMode === root\.agentHistoryMode[\s\S]*Key_Up[\s\S]*moveAgentHistorySelection\(-1\)[\s\S]*Key_Down[\s\S]*moveAgentHistorySelection\(1\)/,
+  "browsing history: Up/Down move the selection directly from the search field")
+assert.doesNotMatch(qml, /function focusAgentHistory|historyList\.forceActiveFocus/,
+  "the agent UI never hands keyboard focus to a list — typing stays active throughout")
 assert.match(qml,
   /id:\s*turnText[\s\S]*textFormat:\s*turnRow\.modelData\.role === "user" \? Text\.PlainText : Text\.MarkdownText/,
   "agent/system turns render markdown; the user's own literal prompt never gets reinterpreted")

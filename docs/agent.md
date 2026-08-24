@@ -32,6 +32,13 @@ below):
   draft, the next press closes the panel outright. Escape always gets you
   out, however many steps in you are — it never leaves a run silently
   finishing in the background after the panel is gone.
+- Arrow keys drive both agent modes directly from the search field —
+  typing stays active the whole time, unlike the results panel's own
+  Down/Tab-to-the-list convention. Viewing a conversation: Up/Down scroll
+  it, Left steps back to the history browser, Right jumps to the latest
+  turn. Browsing history: Up/Down move the selection, Enter opens it; a
+  small delete icon on each row (rather than a keyboard shortcut) removes a
+  conversation, since Backspace/Delete stay ordinary text-editing keys here.
 - Agent and system turns render as markdown (bold, lists, code spans,
   headings, links) via Qt's built-in `Text.MarkdownText`, not a custom
   renderer — no syntax highlighting inside code blocks, but headings, lists,
