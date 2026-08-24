@@ -344,6 +344,20 @@ Item {
   // practice (a single history browser), so this stays a flat map rather
   // than also being keyed by requestId.
   property var agentConversationTurns: ({})
+  // Agent-helper stderr and protocol-level "error" messages, kept visible
+  // rather than silently discarded — an agent run is a real subprocess that
+  // can genuinely fail to start (missing python3, a broken venv, a raised
+  // exception before the first line of output), and without this there is
+  // no way to tell "it's still working" from "it silently died."
+  property var agentWarnings: []
+
+  function agentAppendWarning(message) {
+    var value = String(message || "").trim()
+    if (!value) return
+    var next = agentWarnings.filter(function(entry) { return entry !== value })
+    next.push(value)
+    agentWarnings = next.slice(Math.max(0, next.length - 8))
+  }
 
   readonly property string agentHelperPath: sourceDir
     ? sourceDir + "/helper/everything_agent_helper.py" : ""
@@ -547,9 +561,10 @@ Item {
       }
       return
     }
-    // "error" is protocol-level and nonfatal by convention (malformed
-    // request, unknown conversation id); nothing currently needs to render
-    // it distinctly from being quietly ignored.
+    if (message.type === "error") {
+      root.agentAppendWarning(message.message || "The agent helper reported an error")
+      return
+    }
   }
 
   Process {
@@ -561,7 +576,10 @@ Item {
     }
 
     stderr: SplitParser {
-      onRead: function(_line) { /* diagnostic only; agent failures are protocol messages */ }
+      onRead: function(line) {
+        var value = String(line || "").trim()
+        if (value) root.agentAppendWarning(value)
+      }
     }
 
     onExited: function(exitCode, _exitStatus) {

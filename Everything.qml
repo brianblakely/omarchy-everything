@@ -1494,17 +1494,24 @@ Panel {
         }
 
         footer: Item {
+          readonly property string latestWarning: {
+            var list = root.everythingService ? root.everythingService.agentWarnings : []
+            return Array.isArray(list) && list.length > 0 ? String(list[list.length - 1]) : ""
+          }
           width: agentTranscript.width
           height: visible ? Style.space(28) : 0
-          visible: root.agentSubmitting || root.agentComposeError.length > 0
+          visible: root.agentSubmitting || root.agentComposeError.length > 0 || latestWarning.length > 0
 
           Text {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.margins: Style.space(8)
             anchors.verticalCenter: parent.verticalCenter
-            text: root.agentComposeError.length > 0 ? root.agentComposeError : "Working…"
-            color: root.agentComposeError.length > 0 ? Color.accent : root.dimForeground
+            text: root.agentComposeError.length > 0 ? root.agentComposeError
+              : parent.latestWarning.length > 0 ? parent.latestWarning
+              : "Working…"
+            color: (root.agentComposeError.length > 0 || parent.latestWarning.length > 0)
+              ? Color.accent : root.dimForeground
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
             wrapMode: Text.Wrap
