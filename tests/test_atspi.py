@@ -173,6 +173,35 @@ class NativeTabTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tabs[1].tab_path[-2:], (2, 0))
         self.assertTrue(tabs[0].selected)
 
+    def test_browser_tabs_inside_native_section_wrappers_are_accepted(self) -> None:
+        native = FakeAccessible(
+            Atspi.Role.PAGE_TAB_LIST,
+            "",
+            FakeAccessible(Atspi.Role.SECTION, ""),
+            FakeAccessible(
+                Atspi.Role.SECTION,
+                "",
+                FakeAccessible(Atspi.Role.BUTTON, "Pinned tab", actionable=True),
+                self.tab("First", "native-1", selected=True),
+                FakeAccessible(Atspi.Role.SEPARATOR, ""),
+                self.tab("Second", "native-2"),
+            ),
+        )
+        root = FakeAccessible(Atspi.Role.FRAME, "Zen Browser", native)
+        top = TopLevel(
+            None, root, 10, 0, "Zen Browser", {"address": "0xabc", "class": "zen"}
+        )
+        tree = AtspiTree.__new__(AtspiTree)
+
+        tabs = tree.native_tabs(top, browser=True)
+
+        self.assertEqual([tab.title for tab in tabs], ["First", "Second"])
+        self.assertEqual([tab.index for tab in tabs], [0, 1])
+        self.assertEqual(tabs[0].tab_path[-2:], (1, 1))
+        self.assertEqual(tabs[1].tab_path[-2:], (1, 3))
+        self.assertTrue(tabs[0].selected)
+        self.assertEqual(tree.native_tabs(top, browser=False), [])
+
     def test_repeated_toolkit_accessible_ids_use_their_structural_identity(self) -> None:
         native = FakeAccessible(
             Atspi.Role.PAGE_TAB_LIST,
@@ -355,6 +384,13 @@ class NativeTabTests(unittest.IsolatedAsyncioTestCase):
             actionable=True,
         )
         tab.action = FakeAction(("dodefault", "showcontextmenu"))
+
+        self.assertTrue(invoke_accessible(tab))
+        self.assertEqual(tab.action.invoked, [0])
+
+    def test_zen_switch_action_activates_a_tab(self) -> None:
+        tab = FakeAccessible(Atspi.Role.PAGE_TAB, "Native tab", actionable=True)
+        tab.action = FakeAction(("switch",))
 
         self.assertTrue(invoke_accessible(tab))
         self.assertEqual(tab.action.invoked, [0])

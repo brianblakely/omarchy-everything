@@ -60,7 +60,14 @@ REJECTED_STRIP_NAME = re.compile(
     re.IGNORECASE,
 )
 NATIVE_TAB_SETTLE_DELAYS = (0.1, 0.2, 0.4, 0.8)
-PREFERRED_TAB_ACTIONS = ("activate", "click", "press", "select", "dodefault")
+PREFERRED_TAB_ACTIONS = (
+    "activate",
+    "click",
+    "press",
+    "select",
+    "switch",
+    "dodefault",
+)
 GTK_ACTION_INTERFACE = "org.gtk.Actions"
 GTK_ACTION_APPLICATION_CLASSES = frozenset(
     {"com.github.pintaproject.pinta", "org.gnome.nautilus"}
@@ -641,8 +648,10 @@ class AtspiTree:
         return contained[0] if len(contained) == 1 else None
 
     @staticmethod
-    def _tab_children(tab_list: Any) -> list[tuple[tuple[int, ...], Any]]:
-        """Return direct tabs plus the one transparent wrapper used by GTK 4."""
+    def _tab_children(
+        tab_list: Any, *, allow_section_wrapper: bool = False
+    ) -> list[tuple[tuple[int, ...], Any]]:
+        """Return tabs from the strict native structures supported here."""
 
         tabs: list[tuple[tuple[int, ...], Any]] = []
         for index, child in enumerate(children(tab_list)):
@@ -650,6 +659,10 @@ class AtspiTree:
                 tabs.append(((index,), child))
                 continue
             if role(child) != Atspi.Role.GROUPING:
+                if allow_section_wrapper and role(child) == Atspi.Role.SECTION:
+                    for nested_index, nested in enumerate(children(child)):
+                        if role(nested) == Atspi.Role.PAGE_TAB:
+                            tabs.append(((index, nested_index), nested))
                 continue
             wrapped = children(child)
             if len(wrapped) == 1 and role(wrapped[0]) == Atspi.Role.PAGE_TAB:
@@ -658,9 +671,9 @@ class AtspiTree:
 
     @classmethod
     def _actionable_tab_children(
-        cls, tab_list: Any
+        cls, tab_list: Any, *, browser: bool = False
     ) -> list[tuple[tuple[int, ...], Any]]:
-        tabs = cls._tab_children(tab_list)
+        tabs = cls._tab_children(tab_list, allow_section_wrapper=browser)
         if not tabs:
             return []
         actionable = sum(
@@ -726,7 +739,10 @@ class AtspiTree:
         strip_name = clean_text(safe_call("", current.get_name))
         if REJECTED_STRIP_NAME.search(strip_name):
             return []
-        tabs = self._actionable_tab_children(current)
+        app_class = clean_text(top.client.get("class"))
+        tabs = self._actionable_tab_children(
+            current, browser=bool(BROWSER_CLASS.search(app_class))
+        )
         return self._native_tabs_from_strip(top, strip_path, tabs) if tabs else []
 
     def native_tabs(self, top: TopLevel, *, browser: bool) -> list[NativeTab]:
@@ -737,7 +753,7 @@ class AtspiTree:
             strip_name = clean_text(safe_call("", node.accessible.get_name))
             if REJECTED_STRIP_NAME.search(strip_name):
                 continue
-            tabs = self._actionable_tab_children(node.accessible)
+            tabs = self._actionable_tab_children(node.accessible, browser=browser)
             if not tabs:
                 continue
             candidates.append((node, tabs))
