@@ -60,7 +60,7 @@ REJECTED_STRIP_NAME = re.compile(
     re.IGNORECASE,
 )
 NATIVE_TAB_SETTLE_DELAYS = (0.1, 0.2, 0.4, 0.8)
-PREFERRED_TAB_ACTIONS = ("activate", "click", "press", "select", "dodefault")
+PREFERRED_TAB_ACTIONS = ("activate", "click", "press", "select", "switch", "dodefault")
 GTK_ACTION_INTERFACE = "org.gtk.Actions"
 GTK_ACTION_APPLICATION_CLASSES = frozenset(
     {"com.github.pintaproject.pinta", "org.gnome.nautilus"}

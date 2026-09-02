@@ -359,6 +359,17 @@ class NativeTabTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(invoke_accessible(tab))
         self.assertEqual(tab.action.invoked, [0])
 
+    def test_firefox_switch_action_activates_a_tab(self) -> None:
+        tab = FakeAccessible(
+            Atspi.Role.PAGE_TAB,
+            "Firefox tab",
+            actionable=True,
+        )
+        tab.action = FakeAction(("switch",))
+
+        self.assertTrue(invoke_accessible(tab))
+        self.assertEqual(tab.action.invoked, [0])
+
     def test_component_only_native_tab_activates_through_focus(self) -> None:
         class FakeComponent:
             focused = False
