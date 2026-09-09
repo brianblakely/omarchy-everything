@@ -30,8 +30,14 @@ Item {
   property int crashCount: 0
   property var requestQueue: []
 
+  // Omarchy strips manifest.__sourceDir before handing the manifest to
+  // third-party plugin services (see publicPluginManifest() in
+  // /usr/share/omarchy/shell/shell.qml), so fall back to resolving our own
+  // directory relative to this file, the same way other third-party plugins
+  // resolve co-located assets (e.g. io.github.kristoferlund.webcam/Panel.qml).
   readonly property string sourceDir: manifest && manifest.__sourceDir
-    ? String(manifest.__sourceDir) : ""
+    ? String(manifest.__sourceDir)
+    : String(Qt.resolvedUrl(".")).replace(/^file:\/\//, "").replace(/\/$/, "")
   readonly property string helperPath: sourceDir ? sourceDir + "/helper/everything_helper.py" : ""
 
   function nextRequestId(prefix) {
