@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "b.everything",
   "name": "Everything",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "author": "Brian Blakely",
   "description": "List, search, and jump directly to every app, tab, buffer, agent... everything.",
   "license": "MIT",

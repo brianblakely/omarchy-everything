@@ -30,8 +30,13 @@ Item {
   property int crashCount: 0
   property var requestQueue: []
 
-  readonly property string sourceDir: manifest && manifest.__sourceDir
-    ? String(manifest.__sourceDir) : ""
+  readonly property string sourceDir: {
+    // Third-party manifests do not expose the host's private source directory
+    // (Omarchy 4.0.3 sanitizes it), so derive the directory from this file.
+    var sourceUrl = String(Qt.resolvedUrl("./"))
+    return sourceUrl.indexOf("file://") === 0
+      ? decodeURIComponent(sourceUrl.slice(7)).replace(/\/$/, "") : ""
+  }
   readonly property string helperPath: sourceDir ? sourceDir + "/helper/everything_helper.py" : ""
 
   function nextRequestId(prefix) {
