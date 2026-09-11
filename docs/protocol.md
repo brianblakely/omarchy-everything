@@ -5,6 +5,14 @@ array. UTF-8 JSON objects travel one per line over stdin/stdout. Protocol and
 plugin versions are independent: every message has `version: 1`, while the
 initial handshake reports plugin version `0.0.1`.
 
+The helper path is derived from the plugin directory. `manifest.__sourceDir`
+is authoritative whenever the key is present, including an empty value, which
+the QML fixture uses to keep the real helper from launching under test. The
+shell deletes that key from third-party manifests, so an absent key means the
+host withheld the directory and `Service.qml` resolves it from its own
+component URL instead. Without that fallback `helperPath` is empty, the helper
+never starts, and every list is silently empty.
+
 The handshake is the only uncorrelated response:
 
 ```json

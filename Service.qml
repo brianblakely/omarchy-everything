@@ -30,8 +30,14 @@ Item {
   property int crashCount: 0
   property var requestQueue: []
 
-  readonly property string sourceDir: manifest && manifest.__sourceDir
-    ? String(manifest.__sourceDir) : ""
+  // The shell deletes `__sourceDir` from third-party manifests, which left
+  // `helperPath` empty and the helper unstarted. An absent key means the host
+  // withheld the directory, so resolve it from this component's own URL; a
+  // present key is honoured verbatim, including the empty value the QML
+  // fixture uses to keep the helper from launching.
+  readonly property string sourceDir: manifest && ("__sourceDir" in manifest)
+    ? String(manifest.__sourceDir || "")
+    : String(Qt.resolvedUrl(".")).replace(/^file:\/\//, "").replace(/\/$/, "")
   readonly property string helperPath: sourceDir ? sourceDir + "/helper/everything_helper.py" : ""
 
   function nextRequestId(prefix) {

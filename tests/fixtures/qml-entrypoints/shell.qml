@@ -485,6 +485,28 @@ ShellRoot {
     if (serviceObject.leaseCount !== 0) console.error("EVERYTHING_LEASE_ERROR release-all")
     console.log("EVERYTHING_LEASE_OK")
 
+    // Helper directory resolution. The shell deletes `__sourceDir` from
+    // third-party manifests, so an absent key must still resolve a helper
+    // path; a present key stays authoritative, including the empty value
+    // this fixture uses to keep the real helper from launching.
+    var strippedManifest = manifestData("")
+    delete strippedManifest.__sourceDir
+    var strippedService = serviceComponent.createObject(host, {
+      manifest: strippedManifest,
+      shell: mockShell,
+      omarchyPath: Quickshell.env("OMARCHY_PATH")
+    })
+    if (!strippedService) {
+      console.error("EVERYTHING_SOURCEDIR_ERROR stripped manifest service not created")
+    } else {
+      if (strippedService.helperPath.indexOf("/helper/everything_helper.py") < 0)
+        console.error("EVERYTHING_SOURCEDIR_ERROR stripped manifest left helperPath unresolved")
+      if (serviceObject.helperPath !== "")
+        console.error("EVERYTHING_SOURCEDIR_ERROR present __sourceDir was not honoured")
+      strippedService.destroy()
+      console.log("EVERYTHING_SOURCEDIR_OK")
+    }
+
     var widgetComponent = component("Everything.qml")
     if (widgetComponent.status !== Component.Ready) {
       console.error("EVERYTHING_LOAD_ERROR widget: " + widgetComponent.errorString())
