@@ -35,9 +35,12 @@ matches [Alacritty's explicit non-goal of providing tabs or splits](https://gith
 
 The AT-SPI provider looks for actionable `PAGE_TAB_LIST`/`PAGE_TAB` objects
 outside every `DOCUMENT_*` subtree. It rejects dock, tool, sidebar, inspector,
-and developer-tool strips. A tab must be either a direct child of its tab list
-or the sole child of one transparent `GROUPING` wrapper, matching current
-GTK 4/libadwaita tab bars without recursively accepting arbitrary controls.
+and developer-tool strips. A tab must be either a direct child of its tab list,
+the sole child of one transparent `GROUPING` wrapper, or—for recognized browser
+windows only—a direct child of a native `SECTION` immediately below the tab
+list. The section form matches current Zen vertical tabs without recursively
+accepting arbitrary controls. The grouping form matches current GTK
+4/libadwaita tab bars.
 Within the globally bounded AT-SPI walk, absolute application-tree depth is not
 used as a native/tab distinction; document ancestry is. A document root is a
 hard traversal boundary, so web-page and spreadsheet descendants neither
@@ -101,8 +104,8 @@ and equivalent native AT-SPI trees in the other listed families.
 Tab identity combines a toolkit accessibility ID with its unique remote object
 path, falling back to its validated structural path when necessary; repeated
 type-like GTK IDs such as `AdwTab` therefore cannot collide. Activation invokes
-the native tab's exposed preferred action (including Chromium's `dodefault`)
-before focusing its exact managed window.
+the native tab's exposed preferred action (including Chromium's `dodefault` and
+Zen's `switch`) before focusing its exact managed window.
 
 Current packaged Pinta and Nautilus use GTK 4/libadwaita tabs that expose only
 a non-operative AT-SPI component-focus interface. They are admitted through
