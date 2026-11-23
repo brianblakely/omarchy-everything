@@ -46,6 +46,17 @@ class AtspiLeaseTests(unittest.TestCase):
         self.assertNotIn("ScreenReaderEnabled", [name for name, _value in backend.writes])
         self.assertTrue(backend.values["ScreenReaderEnabled"])
 
+    def test_missing_screen_reader_property_does_not_block_the_lease(self) -> None:
+        # Some at-spi2-core builds expose only org.a11y.Status.IsEnabled.
+        backend = FakeStatus(False, False)
+        del backend.values["ScreenReaderEnabled"]
+        lease = AtspiRuntimeLease(backend)
+        lease.acquire()
+        self.assertTrue(backend.values["IsEnabled"])
+        self.assertIsNone(lease.original_screen_reader)
+        lease.restore()
+        self.assertEqual(backend.writes, [("IsEnabled", True), ("IsEnabled", False)])
+
 
 class AtspiExecutorTests(unittest.IsolatedAsyncioTestCase):
     async def test_close_is_bounded_without_a_default_executor_joiner(self) -> None:
