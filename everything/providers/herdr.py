@@ -311,20 +311,45 @@ class HerdrProvider:
 
     @staticmethod
     def _session_processes(context: ScanContext, session_name: str) -> list[Any]:
-        matches: list[Any] = []
-        for process in context.processes.named("herdr"):
-            if "server" in process.argv:
+        return [
+            process
+            for process in context.processes.named("herdr")
+            if HerdrProvider._client_session(process.argv) == session_name
+        ]
+
+    @staticmethod
+    def _client_session(argv: tuple[str, ...] | list[str]) -> str | None:
+        """Return the local session an argv attaches to as an app client.
+
+        The server, one-shot API commands such as `herdr pane list` (which
+        agents run from inside panes), and `--remote`/`--machine` invocations
+        are not clients of a local session and yield None.
+        """
+
+        session = "default"
+        positionals: list[str] = []
+        arguments = list(argv[1:])
+        index = 0
+        while index < len(arguments):
+            argument = arguments[index]
+            if argument == "--session":
+                if index + 1 >= len(arguments):
+                    return None
+                session = arguments[index + 1]
+                index += 2
                 continue
-            argv = list(process.argv)
-            process_session = "default"
-            for index, argument in enumerate(argv[:-1]):
-                if argument == "--session":
-                    process_session = argv[index + 1]
-                elif argument == "attach" and index > 0 and argv[index - 1] == "session":
-                    process_session = argv[index + 1]
-            if process_session == session_name:
-                matches.append(process)
-        return matches
+            if argument.startswith("--session="):
+                session = argument.split("=", 1)[1]
+            elif argument.startswith("-"):
+                return None
+            else:
+                positionals.append(argument)
+            index += 1
+        if positionals in ([], ["client"]):
+            return session
+        if len(positionals) == 3 and positionals[:2] == ["session", "attach"]:
+            return positionals[2]
+        return None
 
     @staticmethod
     def _activation(
