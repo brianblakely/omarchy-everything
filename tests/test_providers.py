@@ -312,6 +312,98 @@ class HerdrActivationTests(unittest.IsolatedAsyncioTestCase):
             launch.assert_not_awaited()
 
 
+class HerdrClientDetectionTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def context(extra: dict[int, ProcessInfo]) -> ScanContext:
+        processes = {
+            100: ProcessInfo(100, 1, "a", "foot", ("foot", "-e", "herdr"), "/home/user"),
+            101: ProcessInfo(101, 100, "b", "herdr", ("herdr",), "/home/user"),
+            **extra,
+        }
+        context = ScanContext(FakeRunner(""), ProcTable(processes))  # type: ignore[arg-type]
+        context.hypr_clients = [{"pid": 100, "address": "0xabc"}, {"pid": 200, "address": "0xdef"}]
+        return context
+
+    def test_only_local_app_clients_count_as_session_clients(self) -> None:
+        cases = {
+            ("herdr",): "default",
+            ("/usr/bin/herdr",): "default",
+            ("herdr", "client"): "default",
+            ("herdr", "--session", "work"): "work",
+            ("herdr", "--session=work"): "work",
+            ("herdr", "session", "attach", "work"): "work",
+            ("herdr", "server"): None,
+            ("herdr", "pane", "wait-output", "w1:p1"): None,
+            ("herdr", "--session", "work", "pane", "list"): None,
+            ("herdr", "session", "list", "--json"): None,
+            ("herdr", "--remote", "host"): None,
+            ("herdr", "--remote=host", "--session", "work"): None,
+            ("herdr", "--machine", "mac", "pane", "list"): None,
+            ("herdr", "update"): None,
+        }
+        for argv, expected in cases.items():
+            with self.subTest(argv=argv):
+                self.assertEqual(HerdrProvider._client_session(argv), expected)
+
+    def test_cli_calls_and_remote_clients_are_not_session_hosts(self) -> None:
+        context = self.context(
+            {
+                102: ProcessInfo(102, 101, "c", "zsh", ("zsh",), "/project"),
+                103: ProcessInfo(
+                    103, 102, "d", "herdr", ("herdr", "pane", "wait-output", "w1:p1"), "/project"
+                ),
+                200: ProcessInfo(200, 1, "e", "foot", ("foot",), "/home/user"),
+                201: ProcessInfo(201, 200, "f", "herdr", ("herdr", "--remote", "host"), "/home/user"),
+            }
+        )
+        self.assertEqual(
+            [process.pid for process in HerdrProvider._session_processes(context, "default")], [101]
+        )
+        self.assertEqual(
+            HerdrProvider._session_hosts(context, "default"), [{"address": "0xabc", "pid": "100"}]
+        )
+
+    async def test_activation_focuses_the_client_while_other_herdr_processes_run(self) -> None:
+        context = self.context(
+            {
+                102: ProcessInfo(102, 101, "c", "zsh", ("zsh",), "/project"),
+                103: ProcessInfo(
+                    103, 102, "d", "herdr", ("herdr", "pane", "wait-output", "w1:p1"), "/project"
+                ),
+                200: ProcessInfo(200, 1, "e", "foot", ("foot",), "/home/user"),
+                201: ProcessInfo(201, 200, "f", "herdr", ("herdr", "--remote", "host"), "/home/user"),
+            }
+        )
+        with tempfile.TemporaryDirectory(prefix="everything-herdr-clients-") as root:
+            socket_path = os.path.join(root, "session.sock")
+            handle = socket.socket(socket.AF_UNIX)
+            handle.bind(socket_path)
+            self.addCleanup(handle.close)
+            socket_info = os.stat(socket_path, follow_symlinks=False)
+            activation = {
+                "socket": socket_path,
+                "session": "default",
+                "server_pid": 0,
+                "socket_dev": socket_info.st_dev,
+                "socket_ino": socket_info.st_ino,
+                "target_kind": "pane",
+                "target_id": "w1:p1",
+            }
+            with patch(
+                "everything.providers.herdr.unix_json_request",
+                new=AsyncMock(return_value={"result": {}}),
+            ), patch(
+                "everything.providers.herdr.focus_address", new=AsyncMock()
+            ) as focus, patch(
+                "everything.providers.herdr.launch_terminal_and_focus", new=AsyncMock()
+            ) as launch:
+                await HerdrProvider().activate(activation, context)
+
+        focus.assert_awaited_once()
+        self.assertEqual(focus.await_args.args[1], "0xabc")
+        launch.assert_not_awaited()
+
+
 class GhosttyBindingTests(unittest.TestCase):
     def test_effective_bindings_are_parsed_without_shell_text(self) -> None:
         parsed = parse_keybindings(
