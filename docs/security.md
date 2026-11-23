@@ -88,8 +88,8 @@ list.
 
 ## Temporary AT-SPI state
 
-While a helper lease exists, a guard reads `org.a11y.Status.IsEnabled` and
-`ScreenReaderEnabled` from `org.a11y.Bus`. If AT-SPI was disabled, the guard
+While a helper lease exists, a guard reads `org.a11y.Status.IsEnabled` and,
+where the bus exposes it, `ScreenReaderEnabled` from `org.a11y.Bus`. If AT-SPI was disabled, the guard
 temporarily writes only `IsEnabled=true`. It never writes
 `ScreenReaderEnabled`. On normal shutdown, cancellation, SIGTERM/SIGINT, or
 parent pipe EOF after a crash, the guard restores the original `IsEnabled`
