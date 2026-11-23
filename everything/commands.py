@@ -102,7 +102,11 @@ async def unix_json_request(
         raise ValueError("Unix socket path must be an absolute NUL-free path")
     reader: asyncio.StreamReader
     writer: asyncio.StreamWriter
-    reader, writer = await asyncio.wait_for(asyncio.open_unix_connection(socket_path), timeout)
+    # The default StreamReader limit is 64 KiB, which a Herdr session snapshot
+    # with a few dozen panes exceeds; readline() then raises ValueError.
+    reader, writer = await asyncio.wait_for(
+        asyncio.open_unix_connection(socket_path, limit=max_bytes), timeout
+    )
     try:
         raw = (json_dumps(request) + "\n").encode()
         writer.write(raw)
